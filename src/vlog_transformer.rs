@@ -120,9 +120,30 @@ pub mod vlog_transformer {
         detector_changes: TimestampedChanges,
         vlog_detector_name_mapping: &HashMap<&str, i16>,
     ) {
+        // The structure for a CHANGE_DETECTION_INFORMATION
+        // description  hex digits
+        // type         2
+        // time delta   3
+        // data amount  1
+        // amount times
+        //   id         2
+        //   state      2
+
         let message_type = "06";
 
-        println!("Not yet implemented detector changes");
+        let data_amount = format!("{:?}", detector_changes.detector_names.len());
+        let static_string = format!("{:}{:03X}{:}", message_type, from_tlcfi_time_to_vlog_time(detector_changes.ms_from_beginning), data_amount);
+        let mut dynamic_string = String::new();
+        for (i, detector_name) in detector_changes.detector_names.iter().enumerate() {
+            dynamic_string.push_str(&format!(
+                "{:02X}{:02X}",
+                vlog_detector_name_mapping.get(detector_name as &str).unwrap(),
+                detector_changes.detector_states[i].to_vlog_state()
+            ));
+        }
+        let full_string = format!("{}{}", static_string, dynamic_string);
+        println!("{}", full_string);
+
     }
 
     fn from_tlcfi_time_to_vlog_time(tlcfi_time: u64) -> u64 {

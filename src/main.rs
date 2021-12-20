@@ -98,9 +98,7 @@ fn parse_change_json(
     change_type: ChangeType,
 ) -> Vec<TimestampedChanges> {
     let ms_from_beginning = find_ms_from_beginning(&json_obj, first_tick);
-
-    println!("parse_detector_change_json: found ms_from_beginning {:?}, and working with json object: {:#}", &ms_from_beginning, &json_obj);
-
+    
     let update = &json_obj["params"]["update"][0];
 
     if update["objects"]["ids"] == JsonValue::Null {
