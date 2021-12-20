@@ -78,51 +78,38 @@ fn parse_string(json_str: &str, first_tick: u64) -> Result<Vec<TimestampedChange
 }
 
 fn parse_json(json_obj: JsonValue, first_tick: u64) -> Vec<TimestampedChanges> {
-    let signal_changes = vec![];
+    let timestamped_changes = vec![];
 
     let message_type = match &json_obj["params"]["update"][0]["objects"]["type"] {
         JsonValue::Number(number) => number.as_fixed_point_u64(0).unwrap(),
         _ => {
-            println!("message doesn't have a type number...");
             0
         }
     };
 
     if message_type != 3 {
         // TODO read detector messages
-        Vec::new()
+        parse_detector_change_json(json_obj, first_tick, timestamped_changes)
     } else {
-        parse_signal_change_json(json_obj, first_tick, signal_changes)
+        parse_signal_change_json(json_obj, first_tick, timestamped_changes)
     }
+}
+
+fn parse_detector_change_json(
+    json_obj: JsonValue,
+    first_tick: u64,
+    mut timestamped_changes: Vec<TimestampedChanges>,
+) -> Vec<TimestampedChanges> {
+    timestamped_changes
 }
 
 fn parse_signal_change_json(
     json_obj: JsonValue,
     first_tick: u64,
-    mut signal_changes: Vec<TimestampedChanges>,
+    mut timestamped_changes: Vec<TimestampedChanges>,
 ) -> Vec<TimestampedChanges> {
-    let ms_from_beginning = match &json_obj["params"]["ticks"] {
-        JsonValue::Number(number) => {
-            let tick = number.as_fixed_point_u64(0).unwrap();
-            if tick < first_tick {
-                println!(
-                    "Tick in message ({:?}) wasn't bigger than initial tick!",
-                    &tick
-                );
-                0
-            } else {
-                number.as_fixed_point_u64(0).unwrap() - first_tick
-            }
-        }
-        _ => {
-            //TODO handle this better
-            println!(
-                "Somehow ticks weren't present {:?}",
-                &json_obj["params"]["ticks"]
-            );
-            1
-        }
-    };
+    let ms_from_beginning = find_ms_from_beginning(&json_obj, first_tick);
+    println!("ms_from_beginning = {:?}", &ms_from_beginning);
     let update = &json_obj["params"]["update"][0];
     if update["objects"]["ids"] == JsonValue::Null {
         return vec![];
@@ -162,12 +149,41 @@ fn parse_signal_change_json(
             "Found signal names {:?} and signal states {:?}",
             &signal_names, &signal_states
         );
-        signal_changes.push(TimestampedChanges {
+        timestamped_changes.push(TimestampedChanges {
             ms_from_beginning,
             signal_names,
             signal_states,
             ..Default::default()
         });
     }
-    signal_changes
+    timestamped_changes
+}
+
+fn find_ms_from_beginning(json_obj: &JsonValue, first_tick: u64) -> u64 {
+    match json_obj["params"]["ticks"] {
+        JsonValue::Number(number) => {
+            let tick = number.as_fixed_point_u64(0).unwrap();
+            if tick < first_tick {
+                eprintln!(
+                    "Tick in message ({:?}) wasn't bigger than initial tick!",
+                    &tick
+                );
+                0
+            } else {
+                println!(
+                    "Found a tick in the message that was expected: {:?}",
+                    &tick
+                );
+                number.as_fixed_point_u64(0).unwrap() - first_tick
+            }
+        }
+        _ => {
+            //TODO handle this better
+            println!(
+                "Somehow ticks weren't present {:?}",
+                json_obj["params"]["ticks"]
+            );
+            1
+        }
+    }    
 }
