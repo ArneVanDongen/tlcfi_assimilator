@@ -46,9 +46,7 @@ fn main() {
         if split_line[1].contains("IN") {
             if first_tick == Option::None {
                 first_tick = find_first_tick(&split_line[2]);
-                println!("Found first tick: {:?}", &first_tick);
             }
-            println!("{:?}", &line);
 
             let stuff = parse_string(split_line[2], first_tick.unwrap());
             signal_changes.extend(stuff.unwrap());
@@ -82,81 +80,93 @@ fn parse_json(json_obj: JsonValue, first_tick: u64) -> Vec<TimestampedChanges> {
 
     let message_type = match &json_obj["params"]["update"][0]["objects"]["type"] {
         JsonValue::Number(number) => number.as_fixed_point_u64(0).unwrap(),
-        _ => {
-            0
-        }
+        _ => 0,
     };
 
     if message_type != 3 {
         // TODO read detector messages
-        parse_detector_change_json(json_obj, first_tick, timestamped_changes)
+        parse_change_json(json_obj, first_tick, timestamped_changes, ChangeType::Detector)
     } else {
-        parse_signal_change_json(json_obj, first_tick, timestamped_changes)
+        parse_change_json(json_obj, first_tick, timestamped_changes, ChangeType::Signal)
     }
 }
 
-fn parse_detector_change_json(
+fn parse_change_json(
     json_obj: JsonValue,
     first_tick: u64,
     mut timestamped_changes: Vec<TimestampedChanges>,
-) -> Vec<TimestampedChanges> {
-    timestamped_changes
-}
-
-fn parse_signal_change_json(
-    json_obj: JsonValue,
-    first_tick: u64,
-    mut timestamped_changes: Vec<TimestampedChanges>,
+    change_type: ChangeType,
 ) -> Vec<TimestampedChanges> {
     let ms_from_beginning = find_ms_from_beginning(&json_obj, first_tick);
-    println!("ms_from_beginning = {:?}", &ms_from_beginning);
+
+    println!("parse_detector_change_json: found ms_from_beginning {:?}, and working with json object: {:#}", &ms_from_beginning, &json_obj);
+
     let update = &json_obj["params"]["update"][0];
+
     if update["objects"]["ids"] == JsonValue::Null {
-        return vec![];
-    }
-    let ids_vec = match &update["objects"]["ids"] {
-        JsonValue::Array(vec) => vec,
-        _ => panic!("yeet"),
-    };
-    let states_vec = match &update["states"] {
-        JsonValue::Array(vec) => vec,
-        _ => panic!("yeet"),
-    };
-
-    assert_eq!(ids_vec.len(), states_vec.len(), "We assume that the amount of IDs and signal states is equal, but for the following tlc-fi json it wasn't:\n{:#}.", json_obj);
-
-    let mut signal_names = Vec::new();
-    let mut signal_states = Vec::new();
-    for (i, id) in ids_vec.iter().enumerate() {
-        let name: &str = match id {
-            JsonValue::Short(short) => short.as_str(),
-            JsonValue::String(string) => string,
+        timestamped_changes
+    } else {
+        let ids_vec = match &update["objects"]["ids"] {
+            JsonValue::Array(vec) => vec,
             _ => panic!("yeet"),
         };
 
-        let state_num = match &states_vec[i]["state"] {
-            JsonValue::Number(number) => number.as_fixed_point_u64(0).unwrap(),
-            JsonValue::Null => continue,
+        let states_vec = match &update["states"] {
+            JsonValue::Array(vec) => vec,
             _ => panic!("yeet"),
         };
 
-        &signal_names.push(name.to_string());
-        &signal_states.push(state_num.into());
-    }
+        assert_eq!(ids_vec.len(), states_vec.len(), "We assume that the amount of IDs and detector states is equal, but for the following tlc-fi json it wasn't:\n{:#}.", json_obj);
 
-    if !signal_names.is_empty() {
-        println!(
-            "Found signal names {:?} and signal states {:?}",
-            &signal_names, &signal_states
-        );
-        timestamped_changes.push(TimestampedChanges {
-            ms_from_beginning,
-            signal_names,
-            signal_states,
-            ..Default::default()
-        });
+        let mut names = Vec::new();
+        let mut states: Vec<u64> = Vec::new();
+        for (i, id) in ids_vec.iter().enumerate() {
+            let name: &str = match id {
+                JsonValue::Short(short) => short.as_str(),
+                JsonValue::String(string) => string,
+                _ => panic!("yeet"),
+            };
+
+            let state_num = match &states_vec[i]["state"] {
+                JsonValue::Number(number) => number.as_fixed_point_u64(0).unwrap(),
+                JsonValue::Null => continue,
+                _ => panic!("yeet"),
+            };
+
+            &names.push(name.to_string());
+            &states.push(state_num.into());
+        }
+
+        if !names.is_empty() {
+            match change_type {
+                ChangeType::Detector => {
+                    let mut detector_states = Vec::new();
+                    for state in states {
+                        detector_states.push(state.into());
+                    }
+                    timestamped_changes.push(TimestampedChanges {
+                        ms_from_beginning,
+                        detector_names: names,
+                        detector_states,
+                        ..Default::default()
+                    });
+                }
+                ChangeType::Signal => {
+                    let mut signal_states = Vec::new();
+                    for state in states {
+                        signal_states.push(state.into());
+                    }
+                    timestamped_changes.push(TimestampedChanges {
+                        ms_from_beginning,
+                        signal_names: names,
+                        signal_states,
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        timestamped_changes
     }
-    timestamped_changes
 }
 
 fn find_ms_from_beginning(json_obj: &JsonValue, first_tick: u64) -> u64 {
@@ -170,20 +180,17 @@ fn find_ms_from_beginning(json_obj: &JsonValue, first_tick: u64) -> u64 {
                 );
                 0
             } else {
-                println!(
-                    "Found a tick in the message that was expected: {:?}",
-                    &tick
-                );
                 number.as_fixed_point_u64(0).unwrap() - first_tick
             }
         }
         _ => {
             //TODO handle this better
-            println!(
-                "Somehow ticks weren't present {:?}",
-                json_obj["params"]["ticks"]
-            );
             1
         }
-    }    
+    }
+}
+
+enum ChangeType {
+    Detector,
+    Signal,
 }
