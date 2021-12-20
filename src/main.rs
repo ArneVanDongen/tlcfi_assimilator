@@ -53,7 +53,9 @@ fn main() {
         }
     }
 
-    vlog_transformer::vlog_transformer::to_vlog(signal_changes);
+    let vlog_message = vlog_transformer::vlog_transformer::to_vlog(signal_changes);
+
+    // println!("All messages:\r\n{:#?}", vlog_message)
 }
 
 fn find_first_tick(first_line_json: &str) -> Option<u64> {
@@ -98,7 +100,7 @@ fn parse_change_json(
     change_type: ChangeType,
 ) -> Vec<TimestampedChanges> {
     let ms_from_beginning = find_ms_from_beginning(&json_obj, first_tick);
-    
+
     let update = &json_obj["params"]["update"][0];
 
     if update["objects"]["ids"] == JsonValue::Null {

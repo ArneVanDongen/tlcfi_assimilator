@@ -7,7 +7,6 @@ pub struct TimestampedChanges {
     pub detector_states: Vec<DetectorState>,
 }
 
-
 #[derive(Debug)]
 pub enum SignalState {
     UNAVAILABLE,

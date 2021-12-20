@@ -10,7 +10,7 @@ pub mod vlog_transformer {
     // 6  - CHANGE_DETECTION_INFORMATION - detector change
     // 13 - STATUS_EXTERNAL_SIGNALGROUP_STATUS_WUS - signal status
     // 14 - CHANGE_EXTERNAL_SIGNALGROUP_STATUS_WUS - signal change
-    pub fn to_vlog(timestamped_changes_vec: Vec<TimestampedChanges>) -> String {
+    pub fn to_vlog(timestamped_changes_vec: Vec<TimestampedChanges>) -> Vec<String> {
         let vlog_signal_name_mapping: HashMap<&str, i16> = [
             ("02", 0),
             ("03", 1),
@@ -64,32 +64,27 @@ pub mod vlog_transformer {
         .cloned()
         .collect();
 
+        let mut vlog_messages: Vec<String> = Vec::new();
+
         // TODO impl first messages in vlog cycle: 
         // first handle all changes, and save the first change state of any entity, then build initial status message on that and insert in front
-
-        let mut last_ms_since = 0;
-
-        insert_vlog_statuses();
+        vlog_messages.extend(insert_vlog_statuses());
 
         for signal_changes in timestamped_changes_vec {
-            last_ms_since = signal_changes.ms_from_beginning;
             if !signal_changes.signal_names.is_empty() {
-                transform_signal_changes(signal_changes, &vlog_signal_name_mapping);
+                vlog_messages.push(transform_signal_changes(signal_changes, &vlog_signal_name_mapping));
             } else if !signal_changes.detector_names.is_empty() {
-                transform_detector_changes(
-                    signal_changes,
-                    &vlog_detector_name_mapping,
-                );
+                vlog_messages.push(transform_detector_changes(signal_changes, &vlog_detector_name_mapping));
             }
         }
 
-        String::new()
+        vlog_messages
     }
 
     fn transform_signal_changes(
         signal_changes: TimestampedChanges,
         vlog_signal_name_mapping: &HashMap<&str, i16>,
-    ) {
+    ) -> String {
         // The structure for a CHANGE_EXTERNAL_SIGNALGROUP_STATUS_WUS
         // description  hex digits
         // type         2
@@ -98,7 +93,6 @@ pub mod vlog_transformer {
         // amount times
         //   id         2
         //   state      2
-
         let message_type = "0E";
 
         let data_amount = format!("{:?}", signal_changes.signal_names.len());
@@ -111,15 +105,14 @@ pub mod vlog_transformer {
                 signal_changes.signal_states[i].to_vlog_state()
             ));
         }
-        let full_string = format!("{}{}", static_string, dynamic_string);
-        println!("{}", full_string);
+        format!("{}{}", static_string, dynamic_string)
     }
 
 
     fn transform_detector_changes(
         detector_changes: TimestampedChanges,
         vlog_detector_name_mapping: &HashMap<&str, i16>,
-    ) {
+    ) -> String {
         // The structure for a CHANGE_DETECTION_INFORMATION
         // description  hex digits
         // type         2
@@ -128,7 +121,6 @@ pub mod vlog_transformer {
         // amount times
         //   id         2
         //   state      2
-
         let message_type = "06";
 
         let data_amount = format!("{:?}", detector_changes.detector_names.len());
@@ -141,16 +133,14 @@ pub mod vlog_transformer {
                 detector_changes.detector_states[i].to_vlog_state()
             ));
         }
-        let full_string = format!("{}{}", static_string, dynamic_string);
-        println!("{}", full_string);
-
+        format!("{}{}", static_string, dynamic_string)
     }
 
     fn from_tlcfi_time_to_vlog_time(tlcfi_time: u64) -> u64 {
         tlcfi_time / 100
     }
 
-    fn insert_vlog_statuses() {
+    fn insert_vlog_statuses() -> Vec<String> {
         // #Tijd referentiebericht zie 2.1. 
         // 012021043008002450
         // TODO can pass start date as argument
@@ -166,20 +156,35 @@ pub mod vlog_transformer {
         // Tenths   7  -  4
         // empty    3  -  0
         let time_reference = format!("{:02X}{}000", 1, "2021121511000");
-        println!("{}", time_reference);
+
         // # V-Log informatie, zie 2.3
         // Has the following format <type><versie><vri_id> 
         // version is 030000
         // 54494E5431 = TINT1
         // 44454D4F = DEMO
+        let tlc_name = "3031";
+        let mut encoded_tlc_name = String::new();
+        for (i, something) in "3031".encode_utf16().enumerate() {
+            encoded_tlc_name.push_str(&format!("{:02X}", something));
+            if i > 19 {
+                break;
+            }
+        }
+        // Ehh fix this
+        if tlc_name.len() < 20 {
+            for i in tlc_name.len()+1..20 {
+                encoded_tlc_name.push_str("20");
+            }
+        }
+        println!("{:?}", &encoded_tlc_name);
+        // "3330333120202020202020202020202020202020"
         let vlog_info = format!("{:02X}{}{}", 4, "030000", "3330333120202020202020202020202020202020");
-        println!("{}", vlog_info);
 
         // # Externe signaalgroep status [0..254] (WUS), zie 3.2. 
         // 0D00000700000000
         // # Detectie informatie [0..254], zie 3.4. 
         // 050000090000000000
         // Nice to have: cuteviewer inserts these
-        
+        vec![time_reference, vlog_info]
     }
 }
