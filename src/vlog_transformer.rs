@@ -1,14 +1,10 @@
-#![warn(missing_docs)]
 //! Transform [TimestampedChanges](struct.TimestampedChanges.html) into a VLog3 messages.
 pub mod vlog_transformer {
 
     use std::{
         collections::HashMap,
-        fmt::Error,
         fs::File,
-        hash::Hash,
-        io::{BufRead, BufReader, Write},
-        ptr::read,
+        io::{BufRead, BufReader},
     };
 
     use chrono::{Datelike, Duration, NaiveDateTime, Timelike};
@@ -20,6 +16,7 @@ pub mod vlog_transformer {
     // TODO Create enum for message types
     // TODO handle unwraps
     // TODO get rid of some to_string calls in favor of &str
+    // TODO implement status messages every 5 minutes with the time reference messages
 
     /// Transforms the given Vec of [TimestampedChanges](struct.TimestampedChanges.html) into a Vec of Strings representing VLog3 messages.
     /// Other than the direct transformation of [TimestampedChanges](struct.TimestampedChanges.html) to change messages, an initial VLog info message is inserted in front.
@@ -47,7 +44,7 @@ pub mod vlog_transformer {
 
         // TODO impl first messages in vlog cycle:
         // first handle all changes, and save the first change state of any entity, then build initial status message on that and insert in front
-        vlog_messages.extend(insert_vlog_statuses(start_date_time));
+        vlog_messages.extend(insert_vlog_statuses(start_date_time, tlc_name));
 
         for timestamped_changes in timestamped_changes_vec {
             if timestamped_changes.ms_from_beginning - ms_of_last_time_reference
@@ -204,7 +201,6 @@ pub mod vlog_transformer {
             data_amount
         );
         let mut dynamic_string = String::new();
-        // TODO sort on vlog id
         let mut vlog_ids_in_message: Vec<(usize, &i16)> = detector_changes
             .detector_names
             .iter()
@@ -226,7 +222,11 @@ pub mod vlog_transformer {
         tlcfi_time / 100
     }
 
-    fn insert_vlog_statuses(start_date_time: NaiveDateTime) -> Vec<String> {
+    fn insert_vlog_statuses(start_date_time: NaiveDateTime, tlc_name: String) -> Vec<String> {
+        vec![get_time_reference(start_date_time, 0), get_vlog_info(tlc_name)]
+    }
+
+    fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: i64) -> String {
         // #Tijd referentiebericht zie 2.1.
         // 012021043008002450
         // TODO can pass start date as argument
@@ -241,43 +241,6 @@ pub mod vlog_transformer {
         // Second   15 -  8
         // Tenths   7  -  4
         // empty    3  -  0
-        let time_reference = get_time_reference(start_date_time, 0);
-
-        // # V-Log informatie, zie 2.3
-        // Has the following format <type><versie><vri_id>
-        // version is 030000
-        // 54494E5431 = TINT1
-        // 44454D4F = DEMO
-        let tlc_name = "3031";
-        let mut encoded_tlc_name = String::new();
-        for (i, something) in "3031".encode_utf16().enumerate() {
-            encoded_tlc_name.push_str(&format!("{:02X}", something));
-            if i > 19 {
-                break;
-            }
-        }
-        // Ehh fix this
-        if tlc_name.len() < 20 {
-            for _ in tlc_name.len() + 1..20 {
-                encoded_tlc_name.push_str("20");
-            }
-        }
-        println!("{:?}", &encoded_tlc_name);
-        // "3330333120202020202020202020202020202020"
-        let vlog_info = format!(
-            "{:02X}{}{}",
-            4, "030000", "3330333120202020202020202020202020202020"
-        );
-
-        // # Externe signaalgroep status [0..254] (WUS), zie 3.2.
-        // 0D00000700000000
-        // # Detectie informatie [0..254], zie 3.4.
-        // 050000090000000000
-        // Nice to have: cuteviewer inserts these
-        vec![time_reference, vlog_info]
-    }
-
-    fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: i64) -> String {
         let reference_time = start_date_time
             .checked_add_signed(Duration::milliseconds(ms_since_beginning))
             .unwrap();
@@ -296,5 +259,31 @@ pub mod vlog_transformer {
         );
         let time_reference = format!("{:02X}{}{}0", 1, date_string, time_string);
         time_reference
+    }
+
+    fn get_vlog_info(tlc_name: String) -> String {
+        // # V-Log informatie, zie 2.3
+        // Has the following format <type><versie><vri_id>
+        // message type is 4
+        // version is 030000
+        // 54494E5431 = TINT1
+        // 44454D4F = DEMO
+        let mut encoded_tlc_name = String::new();
+        for (i, something) in tlc_name.encode_utf16().enumerate() {
+            encoded_tlc_name.push_str(&format!("{:02X}", something));
+            if i > 19 {
+                break;
+            }
+        }
+        if tlc_name.len() < 20 {
+            for _ in tlc_name.len()..20 {
+                encoded_tlc_name.push_str("20");
+            }
+        }
+        let vlog_info = format!(
+            "{:02X}{}{}",
+            4, "030000", &encoded_tlc_name
+        );
+        vlog_info
     }
 }
