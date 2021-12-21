@@ -2,7 +2,7 @@
 //! Transform [TimestampedChanges](struct.TimestampedChanges.html) into a VLog3 messages.
 pub mod vlog_transformer {
 
-    use chrono::{Datelike, Duration, NaiveDate, Timelike};
+    use chrono::{Duration, NaiveDateTime, Datelike, Timelike};
     use std::collections::HashMap;
 
     use tlcfi_assimilator::TimestampedChanges;
@@ -18,7 +18,7 @@ pub mod vlog_transformer {
     /// Only the following types of VLog change messages are supported:
     /// * 6  - Detectie informatie
     /// * 14 - Externe signaalgroep status 
-    pub fn to_vlog(timestamped_changes_vec: Vec<TimestampedChanges>) -> Vec<String> {
+    pub fn to_vlog(timestamped_changes_vec: Vec<TimestampedChanges>, start_date_time: NaiveDateTime) -> Vec<String> {
         let vlog_signal_name_mapping: HashMap<&str, i16> = [
             ("02", 0),
             ("03", 1),
@@ -78,13 +78,13 @@ pub mod vlog_transformer {
 
         // TODO impl first messages in vlog cycle:
         // first handle all changes, and save the first change state of any entity, then build initial status message on that and insert in front
-        vlog_messages.extend(insert_vlog_statuses());
+        vlog_messages.extend(insert_vlog_statuses(start_date_time));
 
         for timestamped_changes in timestamped_changes_vec {
             if timestamped_changes.ms_from_beginning - ms_of_last_time_reference
                 > TIME_REFERENCE_INTERVAL_IN_S * 1000
             {
-                vlog_messages.push(get_time_reference(timestamped_changes.ms_from_beginning));
+                vlog_messages.push(get_time_reference(start_date_time, timestamped_changes.ms_from_beginning));
                 ms_of_last_time_reference = timestamped_changes.ms_from_beginning;
             }
             if !timestamped_changes.signal_names.is_empty() {
@@ -195,7 +195,7 @@ pub mod vlog_transformer {
         tlcfi_time / 100
     }
 
-    fn insert_vlog_statuses() -> Vec<String> {
+    fn insert_vlog_statuses(start_date_time: NaiveDateTime) -> Vec<String> {
         // #Tijd referentiebericht zie 2.1.
         // 012021043008002450
         // TODO can pass start date as argument
@@ -210,7 +210,7 @@ pub mod vlog_transformer {
         // Second   15 -  8
         // Tenths   7  -  4
         // empty    3  -  0
-        let time_reference = get_time_reference(0);
+        let time_reference = get_time_reference(start_date_time, 0);
 
         // # V-Log informatie, zie 2.3
         // Has the following format <type><versie><vri_id>
@@ -246,9 +246,8 @@ pub mod vlog_transformer {
         vec![time_reference, vlog_info]
     }
 
-    fn get_time_reference(ms_since_beginning: i64) -> String {
-        let start_time = NaiveDate::from_ymd(2021, 12, 15).and_hms(11, 00, 00);
-        let reference_time = start_time
+    fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: i64) -> String {
+        let reference_time = start_date_time
             .checked_add_signed(Duration::milliseconds(ms_since_beginning))
             .unwrap();
         let date_string = format!(

@@ -19,7 +19,7 @@ FLAGS:
 
 OPTIONS:
   --chronological BOOL      Sets whether the logs are in chronological order (newest last) [default: false]
-  --start-date-time STRING  ISO 8601 timestamp for the start moment of tlcfi logs (e.g. 2021-12-15T-11:00:00.000)
+  --start-date-time STRING  ISO 8601 timestamp for the start moment of tlcfi logs (e.g. 2021-12-15T11:00:00.000)
   --tlcfi-log-file STRING   Sets the name of the file to load [default: tlcfi.txt]
 
 ARGS:
@@ -83,7 +83,7 @@ fn main() {
         }
     }
 
-    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(signal_changes);
+    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(signal_changes, app_args.start_date_time);
 
     let mut file = File::create("test.vlg").unwrap();
     for msg in vlog_messages {
@@ -103,7 +103,7 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
         is_chronological: pargs
             .opt_value_from_str("--chronological")?
             .unwrap_or(false),
-        start_date_time: pargs.value_from_str("--start-date-time")?,
+        start_date_time: pargs.value_from_fn("--start-date-time", parse_date_time)?,
         tlcfi_log_file: pargs
             .opt_value_from_str("--tlcfi-log-file")?
             .unwrap_or("tlcfi.txt".to_string()),
@@ -113,13 +113,19 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
     Ok(args)
 }
 
-
+fn parse_date_time(arg: &str) -> Result<chrono::NaiveDateTime, String> {
+    // <Year-month-day format (ISO 8601). Same to %Y-%m-%d><T><Hour-minute-second format. Same to %H:%M:%S><Similar to .%f but left-aligned. These all consume the leading dot.>
+    match chrono::NaiveDateTime::parse_from_str(arg, "%FT%T%.3f") {
+        Ok(date_time) => Ok(date_time),
+        Err(error) => Err(format!("Failed to transform argument {} into a date time:\n{}", arg, error)),
+    }
+}
 
 
 #[derive(Debug)]
 struct AppArgs {
     is_chronological: bool,
-    start_date_time: String,
+    start_date_time: chrono::NaiveDateTime,
     tlcfi_log_file: String,
     vlog_tlcfi_mapping_file: String,
 }

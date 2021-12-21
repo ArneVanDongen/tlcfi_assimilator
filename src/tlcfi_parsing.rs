@@ -1,6 +1,9 @@
 pub mod tlcfi_parsing {
 
-    use json::{JsonValue, parse};
+    // TODO handle all unwraps properly
+    // TODO refactor all unformative panics
+
+    use json::{parse, JsonValue};
 
     use tlcfi_assimilator::TimestampedChanges;
 
@@ -8,9 +11,7 @@ pub mod tlcfi_parsing {
         let json_res = parse(first_line_json);
         match json_res {
             Ok(json_obj) => match &json_obj["params"]["ticks"] {
-                JsonValue::Number(number) => {
-                    Option::Some(number.as_fixed_point_u64(0).unwrap())
-                }
+                JsonValue::Number(number) => Option::Some(number.as_fixed_point_u64(0).unwrap()),
                 _ => Option::None,
             },
             Err(_) => Option::None,
