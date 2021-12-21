@@ -1,6 +1,6 @@
 #[derive(Debug, Default)]
 pub struct TimestampedChanges {
-    pub ms_from_beginning: u64,
+    pub ms_from_beginning: i64,
     pub signal_names: Vec<String>,
     pub signal_states: Vec<SignalState>,
     pub detector_names: Vec<String>,
