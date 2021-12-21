@@ -32,13 +32,13 @@ ARGS:
 
 /// The entry point for this program
 ///
-/// Expects a file `tlcfi.txt` with lines looking like the following:
+/// Expects a file `tlcfi.txt` (or the one given in command args) with lines looking like s:
 ///
 /// ```
-/// 2021-10-15 16:07:42,994 INFO tlcFiMessages:41 - IN - {"jsonrpc":"2.0","method":"UpdateState","params":{"ticks":2181449574,"update":[{"objects":{"ids":["01","04","05","06","12"],"type":3},"states":[{"predictions":[{"likelyEnd":2181456774,"maxEnd":2181468174,"minEnd":2181456774,"state":6},{"likelyEnd":2181460774,"maxEnd":2181472174,"minEnd":2181460774,"state":8}]},{"predictions":[{"confidence":15,"likelyEnd":2181450174,"maxEnd":2181450574,"minEnd":2181450174,"state":3},{"likelyEnd":2181456174,"maxEnd":2181535574,"minEnd":2181456174,"state":6},{"likelyEnd":2181460174,"maxEnd":2181539574,"minEnd":2181460174,"state":8}]},{"predictions":[{"confidence":3,"minEnd":2181449674,"state":3}]},{"predictions":[{"likelyEnd":2181455574,"maxEnd":2181529974,"minEnd":2181455574,"state":6},{"likelyEnd":2181459574,"maxEnd":2181533974,"minEnd":2181459574,"state":8}]},{"predictions":[{"confidence":3,"minEnd":2181449674,"state":3}]}]}]}}
+/// 2021-10-15 16:07:42,994 INFO tlcFiMessages:41 - IN - {"jsonrpc":"2.0","method":"UpdateState","params":{"ticks":2181449574,"update":[{"objects":{"ids":["01"],"type":3},"states":[{"predictions":[{"likelyEnd":2181456774,"maxEnd":2181468174,"minEnd":2181456774,"state":6},{"likelyEnd":2181460774,"maxEnd":2181472174,"minEnd":2181460774,"state":8}]}}]}]}}
 /// ```
 ///
-/// Looking from the end of the line, it is split in three parts using `-` as a delimiter.
+/// The line is split in three parts using `- ` as a delimiter, and we assume the tlcfi json is the 3rd element. The second element is used to see whether a message is incoming or outgoing of ST.
 fn main() {
     let app_args = match parse_args() {
         Ok(v) => v,
@@ -56,7 +56,6 @@ fn main() {
 
     let mut signal_changes: Vec<TimestampedChanges> = Vec::new();
 
-    // Read the file line by line using the lines() iterator from std::io::BufRead.
     let mut time_sorted_lines = Vec::new();
     for line in reader.lines() {
         if app_args.is_chronological {
@@ -67,7 +66,6 @@ fn main() {
     }
 
     for line in time_sorted_lines {
-        // println!("Looking at line: {:?}", line);
         let filtered_line = line.replace("\"\"", "\"");
         let split_line: Vec<&str> = filtered_line.split("- ").collect();
 
@@ -83,7 +81,7 @@ fn main() {
         }
     }
 
-    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(signal_changes, app_args.start_date_time);
+    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(signal_changes, app_args.start_date_time, app_args.vlog_tlcfi_mapping_file);
 
     let mut file = File::create("test.vlg").unwrap();
     for msg in vlog_messages {
@@ -105,9 +103,9 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
             .unwrap_or(false),
         start_date_time: pargs.value_from_fn("--start-date-time", parse_date_time)?,
         tlcfi_log_file: pargs
-            .opt_value_from_str("--tlcfi-log-file")?
+            .opt_value_from_fn("--tlcfi-log-file", check_file_existence)?
             .unwrap_or("tlcfi.txt".to_string()),
-        vlog_tlcfi_mapping_file: pargs.free_from_str()?,
+        vlog_tlcfi_mapping_file: pargs.free_from_fn(check_file_existence)?,
     };
 
     Ok(args)
@@ -121,6 +119,12 @@ fn parse_date_time(arg: &str) -> Result<chrono::NaiveDateTime, String> {
     }
 }
 
+fn check_file_existence(file_name: &str) -> Result<String, String> {
+    match File::open(file_name) {
+        Ok(_) => Ok(file_name.to_string()),
+        Err(error) => Err(format!("File name passed as argument '{}' could not be opened. Did you make a typo?\n{}", file_name, error)),
+    }
+} 
 
 #[derive(Debug)]
 struct AppArgs {

@@ -2,75 +2,44 @@
 //! Transform [TimestampedChanges](struct.TimestampedChanges.html) into a VLog3 messages.
 pub mod vlog_transformer {
 
-    use chrono::{Duration, NaiveDateTime, Datelike, Timelike};
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        fmt::Error,
+        fs::File,
+        hash::Hash,
+        io::{BufRead, BufReader, Write},
+        ptr::read,
+    };
+
+    use chrono::{Datelike, Duration, NaiveDateTime, Timelike};
 
     use tlcfi_assimilator::TimestampedChanges;
 
     const TIME_REFERENCE_INTERVAL_IN_S: i64 = 300;
 
     // TODO Create enum for message types
+    // TODO handle unwraps
+    // TODO get rid of some to_string calls in favor of &str
 
     /// Transforms the given Vec of [TimestampedChanges](struct.TimestampedChanges.html) into a Vec of Strings representing VLog3 messages.
     /// Other than the direct transformation of [TimestampedChanges](struct.TimestampedChanges.html) to change messages, an initial VLog info message is inserted in front.
     /// Time reference messages are also inserted every 5 minutes.
-    /// 
+    ///
     /// Only the following types of VLog change messages are supported:
     /// * 6  - Detectie informatie
-    /// * 14 - Externe signaalgroep status 
-    pub fn to_vlog(timestamped_changes_vec: Vec<TimestampedChanges>, start_date_time: NaiveDateTime) -> Vec<String> {
-        let vlog_signal_name_mapping: HashMap<&str, i16> = [
-            ("02", 0),
-            ("03", 1),
-            ("04", 2),
-            ("06", 3),
-            ("07", 4),
-            ("08", 5),
-            ("58", 6),
-            ("59", 7),
-            ("61", 8),
-            ("62", 9),
-            ("68", 10),
-            ("69", 11),
-            ("71", 12),
-        ]
-        .iter()
-        .cloned()
-        .collect();
-        let vlog_detector_name_mapping: HashMap<&str, i16> = [
-            ("D611", 0),
-            ("D612", 1),
-            ("D621", 2),
-            ("D622", 3),
-            ("D623", 4),
-            ("D624", 5),
-            ("D625", 6),
-            ("D626", 7),
-            ("D681", 8),
-            ("D682", 9),
-            ("D683", 10),
-            ("D684", 11),
-            ("D685", 12),
-            ("D691", 13),
-            ("D692", 14),
-            ("D693", 15),
-            ("D581", 16),
-            ("D582", 17),
-            ("D627", 18),
-            ("D711", 19),
-            ("D712", 20),
-            ("D713", 21),
-            ("D714", 22),
-            ("D029", 23),
-            ("D039", 24),
-            ("D628", 25),
-            ("D629", 26),
-            ("Drk481", 27),
-            ("Drk491", 28),
-        ]
-        .iter()
-        .cloned()
-        .collect();
+    /// * 14 - Externe signaalgroep status
+    pub fn to_vlog(
+        timestamped_changes_vec: Vec<TimestampedChanges>,
+        start_date_time: NaiveDateTime,
+        vlog_tlcfi_mapping_file: String,
+    ) -> Vec<String> {
+        let tlc_name = load_tlc_name(&vlog_tlcfi_mapping_file).unwrap();
+        println!("Found tlc name: {}", tlc_name);
+        let vlog_signal_name_mapping = load_mappings(&vlog_tlcfi_mapping_file, "Signals").unwrap();
+        println!("Found signal mapping: {:#?}", &vlog_signal_name_mapping);
+        let vlog_detector_name_mapping =
+            load_mappings(&vlog_tlcfi_mapping_file, "Detectors").unwrap();
+        println!("Found detector mapping: {:#?}", &vlog_detector_name_mapping);
 
         let mut vlog_messages: Vec<String> = Vec::new();
 
@@ -84,7 +53,10 @@ pub mod vlog_transformer {
             if timestamped_changes.ms_from_beginning - ms_of_last_time_reference
                 > TIME_REFERENCE_INTERVAL_IN_S * 1000
             {
-                vlog_messages.push(get_time_reference(start_date_time, timestamped_changes.ms_from_beginning));
+                vlog_messages.push(get_time_reference(
+                    start_date_time,
+                    timestamped_changes.ms_from_beginning,
+                ));
                 ms_of_last_time_reference = timestamped_changes.ms_from_beginning;
             }
             if !timestamped_changes.signal_names.is_empty() {
@@ -105,9 +77,68 @@ pub mod vlog_transformer {
         vlog_messages
     }
 
+    fn load_tlc_name(file_name: &str) -> Result<String, String> {
+        let mapping_file = File::open(file_name).unwrap();
+
+        let reader = BufReader::new(mapping_file);
+        let mut tlc_name = Option::None;
+        let mut next_line_has_info = false;
+        for line in reader.lines() {
+            let read_line = line.unwrap().trim().to_string();
+            if !next_line_has_info && read_line.contains("//") && read_line.contains("TLC") {
+                next_line_has_info = true;
+            }
+            if next_line_has_info {
+                if !read_line.contains("//") && !read_line.is_empty() {
+                    tlc_name = Some(read_line.to_string());
+                    break;
+                }
+            }
+        }
+
+        match tlc_name {
+            Some(name) => Ok(name),
+            None => Err("We didn't find a tlc name!".to_string()),
+        }
+    }
+
+    fn load_mappings(file_name: &str, mapping_type: &str) -> Result<HashMap<String, i16>, String> {
+        let mapping_file = File::open(file_name).unwrap();
+
+        let reader = BufReader::new(mapping_file);
+        let mut mappings = HashMap::new();
+
+        let mut next_line_has_info = false;
+        for line in reader.lines() {
+            let read_line = line.unwrap().trim().to_string();
+
+            if !next_line_has_info && read_line.contains("//") && read_line.contains(mapping_type) {
+                next_line_has_info = true;
+            } else if next_line_has_info && !read_line.is_empty() && !read_line.contains("//") {
+                let mapping: Vec<&str> = read_line.split(",").collect();
+                mappings.insert(
+                    mapping[1].trim().to_string(),
+                    mapping[0].trim().parse::<i16>().unwrap(),
+                );
+            } else if next_line_has_info {
+                // "Stopping file parsings since we found an empty line when we expected info."
+                break;
+            }
+        }
+
+        if mappings.is_empty() {
+            Err(format!(
+                "No {} mappings found in the mapping file!",
+                mapping_type
+            ))
+        } else {
+            Ok(mappings)
+        }
+    }
+
     fn transform_signal_changes(
         signal_changes: TimestampedChanges,
-        vlog_signal_name_mapping: &HashMap<&str, i16>,
+        vlog_signal_name_mapping: &HashMap<String, i16>,
         ms_of_last_time_reference: i64,
     ) -> String {
         // The structure for a CHANGE_EXTERNAL_SIGNALGROUP_STATUS_WUS
@@ -150,7 +181,7 @@ pub mod vlog_transformer {
 
     fn transform_detector_changes(
         detector_changes: TimestampedChanges,
-        vlog_detector_name_mapping: &HashMap<&str, i16>,
+        vlog_detector_name_mapping: &HashMap<String, i16>,
         ms_of_last_time_reference: i64,
     ) -> String {
         // The structure for a CHANGE_DETECTION_INFORMATION
