@@ -1,4 +1,5 @@
 #![warn(missing_docs)]
+//! Transform [TimestampedChanges](struct.TimestampedChanges.html) into a VLog3 messages.
 pub mod vlog_transformer {
 
     use chrono::{Datelike, Duration, NaiveDate, Timelike};
@@ -8,11 +9,15 @@ pub mod vlog_transformer {
 
     const TIME_REFERENCE_INTERVAL_IN_S: i64 = 300;
 
-    // types
-    // 5  - STATUS_DETECTION_INFORMATION - detector status
-    // 6  - CHANGE_DETECTION_INFORMATION - detector change
-    // 13 - STATUS_EXTERNAL_SIGNALGROUP_STATUS_WUS - signal status
-    // 14 - CHANGE_EXTERNAL_SIGNALGROUP_STATUS_WUS - signal change
+    // TODO Create enum for message types
+
+    /// Transforms the given Vec of [TimestampedChanges](struct.TimestampedChanges.html) into a Vec of Strings representing VLog3 messages.
+    /// Other than the direct transformation of [TimestampedChanges](struct.TimestampedChanges.html) to change messages, an initial VLog info message is inserted in front.
+    /// Time reference messages are also inserted every 5 minutes.
+    /// 
+    /// Only the following types of VLog change messages are supported:
+    /// * 6  - Detectie informatie
+    /// * 14 - Externe signaalgroep status 
     pub fn to_vlog(timestamped_changes_vec: Vec<TimestampedChanges>) -> Vec<String> {
         let vlog_signal_name_mapping: HashMap<&str, i16> = [
             ("02", 0),
