@@ -124,12 +124,20 @@ pub mod vlog_transformer {
             ),
             data_amount
         );
+
         let mut dynamic_string = String::new();
-        for (i, signal_name) in signal_changes.signal_names.iter().enumerate() {
+        let mut vlog_ids_in_message: Vec<(usize, &i16)> = signal_changes
+            .signal_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (index, vlog_signal_name_mapping.get(name as &str).unwrap()))
+            .collect();
+        vlog_ids_in_message.sort_by(|(_, id1), (_, id2)| id1.partial_cmp(id2).unwrap());
+        for (index, signal_id) in vlog_ids_in_message {
             dynamic_string.push_str(&format!(
                 "{:02X}{:02X}",
-                vlog_signal_name_mapping.get(signal_name as &str).unwrap(),
-                signal_changes.signal_states[i].to_vlog_state()
+                signal_id,
+                signal_changes.signal_states[index].to_vlog_state()
             ));
         }
         format!("{}{}", static_string, dynamic_string)
@@ -161,13 +169,18 @@ pub mod vlog_transformer {
         );
         let mut dynamic_string = String::new();
         // TODO sort on vlog id
-        for (i, detector_name) in detector_changes.detector_names.iter().enumerate() {
+        let mut vlog_ids_in_message: Vec<(usize, &i16)> = detector_changes
+            .detector_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (index, vlog_detector_name_mapping.get(name as &str).unwrap()))
+            .collect();
+        vlog_ids_in_message.sort_by(|(_, id1), (_, id2)| id1.partial_cmp(id2).unwrap());
+        for (index, vlog_id) in vlog_ids_in_message {
             dynamic_string.push_str(&format!(
                 "{:02X}{:02X}",
-                vlog_detector_name_mapping
-                    .get(detector_name as &str)
-                    .unwrap(),
-                detector_changes.detector_states[i].to_vlog_state()
+                vlog_id,
+                detector_changes.detector_states[index].to_vlog_state()
             ));
         }
         format!("{}{}", static_string, dynamic_string)
