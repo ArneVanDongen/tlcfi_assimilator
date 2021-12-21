@@ -5,7 +5,7 @@
 
 use std::{
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Write},
 };
 
 use json::JsonValue;
@@ -40,20 +40,28 @@ fn main() {
     }
 
     for line in reverse_lines {
-        let split_line: Vec<&str> = line.split("- ").collect();
+        // println!("Looking at line: {:?}", line);
+        let filtered_line = line.replace("\"\"", "\"");
+        let split_line: Vec<&str> = filtered_line.split("- ").collect();
 
         // Only consider message from the TLC.
         if split_line[1].contains("IN") {
             if first_tick == Option::None {
                 first_tick = find_first_tick(&split_line[2]);
             }
-
-            let stuff = parse_string(split_line[2], first_tick.unwrap());
-            signal_changes.extend(stuff.unwrap());
+            if first_tick != Option::None {
+                let stuff = parse_string(split_line[2], first_tick.unwrap());
+                signal_changes.extend(stuff.unwrap());
+            }
         }
     }
 
     let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(signal_changes);
+
+    let mut file = File::create("test.vlg").unwrap();
+    for msg in vlog_messages {
+        write!(file, "{}\r\n", msg).unwrap();
+    }
 }
 
 fn find_first_tick(first_line_json: &str) -> Option<u64> {
@@ -85,9 +93,19 @@ fn parse_json(json_obj: JsonValue, first_tick: u64) -> Vec<TimestampedChanges> {
 
     if message_type != 3 {
         // TODO read detector messages
-        parse_change_json(json_obj, first_tick, timestamped_changes, ChangeType::Detector)
+        parse_change_json(
+            json_obj,
+            first_tick,
+            timestamped_changes,
+            ChangeType::Detector,
+        )
     } else {
-        parse_change_json(json_obj, first_tick, timestamped_changes, ChangeType::Signal)
+        parse_change_json(
+            json_obj,
+            first_tick,
+            timestamped_changes,
+            ChangeType::Signal,
+        )
     }
 }
 
