@@ -9,7 +9,27 @@ mod vlog_transformer;
 
 use tlcfi_assimilator::TimestampedChanges;
 
+const ARGS_HELP: &str = "\
+TLC-FI Assimilator
+
+USAGE:
+  tlcfi_assimilator [OPTIONS] --start-date-time STRING [VLOG_TLCFI_MAPPING_FILE]
+
+FLAGS:
+  -h, --help                Prints help information
+
+OPTIONS:
+  --chronological BOOL      Sets whether the logs are in chronological order (newest last) [default: false]
+  --start-date-time STRING  ISO 8601 timestamp for the start moment of tlcfi logs (e.g. 2021-12-15T-11:00:00.000)
+  --tlcfi-log-file STRING   Sets the name of the file to load [default: tlcfi.txt]
+
+ARGS:
+  <VLOG_TLCFI_MAPPING_FILE>
+";
+
 // TODO handle all unwraps properly
+// TODO extract tlcfi parsing to a different module
+// TODO retrieve the start time of the logs
 
 /// The entry point for this program
 ///
@@ -21,22 +41,33 @@ use tlcfi_assimilator::TimestampedChanges;
 ///
 /// Looking from the end of the line, it is split in three parts using `-` as a delimiter.
 fn main() {
-    let filename = "tlcfi.txt";
-    // Open the file in read-only mode (ignoring errors).
-    let file = File::open(filename).unwrap();
-    let reader = BufReader::new(file);
+    let app_args = match parse_args() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error: {}.", e);
+            print!("{}", ARGS_HELP);
+            std::process::exit(1);
+        }
+    };
+
+    let tlcfi_log_file = File::open(app_args.tlcfi_log_file).unwrap();
+    let reader = BufReader::new(tlcfi_log_file);
 
     let mut first_tick = Option::None;
 
     let mut signal_changes: Vec<TimestampedChanges> = Vec::new();
 
     // Read the file line by line using the lines() iterator from std::io::BufRead.
-    let mut reverse_lines = Vec::new();
+    let mut time_sorted_lines = Vec::new();
     for line in reader.lines() {
-        reverse_lines.insert(0, line.unwrap());
+        if app_args.is_chronological {
+            time_sorted_lines.push(line.unwrap());
+        } else {
+            time_sorted_lines.insert(0, line.unwrap());
+        }
     }
 
-    for line in reverse_lines {
+    for line in time_sorted_lines {
         // println!("Looking at line: {:?}", line);
         let filtered_line = line.replace("\"\"", "\"");
         let split_line: Vec<&str> = filtered_line.split("- ").collect();
@@ -59,6 +90,28 @@ fn main() {
     for msg in vlog_messages {
         write!(file, "{}\r\n", msg).unwrap();
     }
+}
+
+fn parse_args() -> Result<AppArgs, pico_args::Error> {
+    let mut pargs = pico_args::Arguments::from_env();
+
+    if pargs.contains(["-h", "--help"]) {
+        print!("{}", ARGS_HELP);
+        std::process::exit(0);
+    }
+
+    let args = AppArgs {
+        is_chronological: pargs
+            .opt_value_from_str("--chronological")?
+            .unwrap_or(false),
+        start_date_time: pargs.value_from_str("--start-date-time")?,
+        tlcfi_log_file: pargs
+            .opt_value_from_str("--tlcfi-log-file")?
+            .unwrap_or("tlcfi.txt".to_string()),
+        vlog_tlcfi_mapping_file: pargs.free_from_str()?,
+    };
+
+    Ok(args)
 }
 
 fn find_first_tick(first_line_json: &str) -> Option<u64> {
@@ -206,4 +259,12 @@ fn find_ms_from_beginning(json_obj: &JsonValue, first_tick: u64) -> u64 {
 enum ChangeType {
     Detector,
     Signal,
+}
+
+#[derive(Debug)]
+struct AppArgs {
+    is_chronological: bool,
+    start_date_time: String,
+    tlcfi_log_file: String,
+    vlog_tlcfi_mapping_file: String,
 }
