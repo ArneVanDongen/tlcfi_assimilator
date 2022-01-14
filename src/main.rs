@@ -54,7 +54,7 @@ fn main() {
 
     let mut first_tick = Option::None;
 
-    let mut signal_changes: Vec<TimestampedChanges> = Vec::new();
+    let mut changes: Vec<TimestampedChanges> = Vec::new();
 
     let mut time_sorted_lines = Vec::new();
     for line in reader.lines() {
@@ -69,6 +69,12 @@ fn main() {
         let filtered_line = line.replace("\"\"", "\"");
         let split_line: Vec<&str> = filtered_line.split("- ").collect();
 
+        if split_line.len() != 3 {
+            // This program is only familiar with lines that split into three parts with "- "
+            println!("Following line was not able to be split by '- ' as expected: {}", line);
+            continue;
+        }
+
         // Only consider message from the TLC.
         if split_line[1].contains("IN") {
             if first_tick == Option::None {
@@ -76,12 +82,12 @@ fn main() {
             }
             if first_tick != Option::None {
                 let timestamped_changes_res = tlcfi_parsing::tlcfi_parsing::parse_string(split_line[2], first_tick.unwrap());
-                signal_changes.extend(timestamped_changes_res.unwrap());
+                changes.extend(timestamped_changes_res.unwrap());
             }
         }
     }
 
-    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(signal_changes, app_args.start_date_time, app_args.vlog_tlcfi_mapping_file);
+    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(changes, app_args.start_date_time, app_args.vlog_tlcfi_mapping_file);
 
     let mut file = File::create("test.vlg").unwrap();
     for msg in vlog_messages {

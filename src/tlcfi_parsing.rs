@@ -34,20 +34,20 @@ pub mod tlcfi_parsing {
             _ => 0,
         };
 
-        if message_type != 3 {
-            parse_change_json(
-                json_obj,
-                first_tick,
-                timestamped_changes,
-                ChangeType::Detector,
-            )
-        } else {
-            parse_change_json(
+        match message_type {
+            3 => parse_change_json(
                 json_obj,
                 first_tick,
                 timestamped_changes,
                 ChangeType::Signal,
-            )
+            ),
+            4 => parse_change_json(
+                json_obj,
+                first_tick,
+                timestamped_changes,
+                ChangeType::Detector,
+            ),
+            _ => Vec::new(),
         }
     }
 
