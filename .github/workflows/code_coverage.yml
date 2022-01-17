@@ -16,18 +16,23 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
-  build:
+  code-coverage:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - name: Rust Code Coverage
-        uses: Swatinem/fucov@v1.0.0
+      # the action needs a nightly toolchain with llvm-tools
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: llvm-tools-preview
 
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
+      # runs cargo with defaults flags, using the default `lcov` output
+      - uses: Swatinem/fucov@v1
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+      # afterwards, upload the report to codecov
+      - uses: codecov/codecov-action@v1
+        with:
+          directory: coverage
