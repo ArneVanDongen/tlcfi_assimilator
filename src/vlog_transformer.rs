@@ -16,7 +16,7 @@ pub mod vlog_transformer {
     // TODO Create enum for message types
     // TODO handle unwraps
     // TODO get rid of some to_string calls in favor of &str
-    // TODO implement status messages every 5 minutes with the time reference messages
+    // TODO implement status messages every 5 minutes with the time reference messages. first handle all changes, and save the first change state of any entity, then build initial status message on that and insert in front
 
     /// Transforms the given Vec of [TimestampedChanges](struct.TimestampedChanges.html) into a Vec of Strings representing VLog3 messages.
     /// Other than the direct transformation of [TimestampedChanges](struct.TimestampedChanges.html) to change messages, an initial VLog info message is inserted in front.
@@ -42,8 +42,6 @@ pub mod vlog_transformer {
 
         let mut ms_of_last_time_reference = 0;
 
-        // TODO impl first messages in vlog cycle:
-        // first handle all changes, and save the first change state of any entity, then build initial status message on that and insert in front
         vlog_messages.extend(insert_vlog_statuses(start_date_time, tlc_name));
 
         for timestamped_changes in timestamped_changes_vec {
@@ -222,15 +220,13 @@ pub mod vlog_transformer {
         tlcfi_time / 100
     }
 
-    fn insert_vlog_statuses(start_date_time: NaiveDateTime, tlc_name: String) -> Vec<String> {
+    fn insert_vlog_statuses(start_date_time: NaiveDateTime, tlc_name: String) -> Vec<String> {   
         vec![get_time_reference(start_date_time, 0), get_vlog_info(tlc_name)]
     }
 
     fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: i64) -> String {
         // #Tijd referentiebericht zie 2.1.
         // 012021043008002450
-        // TODO can pass start date as argument
-        // 012021121511000000
         // Elements of the time are encoded in a way that they are readable
         // Element  bit index   meaning
         // Year     63 - 48     the year 2021 is shown in hex as the value 0x2021

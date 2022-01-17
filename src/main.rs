@@ -29,6 +29,7 @@ ARGS:
 // TODO handle all unwraps properly
 // TODO extract tlcfi parsing to a different module
 // TODO retrieve the start time of the logs
+// TODO give the vlog file the correct name
 
 /// The entry point for this program
 ///
@@ -52,7 +53,7 @@ fn main() {
     let tlcfi_log_file = File::open(app_args.tlcfi_log_file).unwrap();
     let reader = BufReader::new(tlcfi_log_file);
 
-    let mut first_tick = Option::None;
+    let first_tick = Option::None;
 
     let mut changes: Vec<TimestampedChanges> = Vec::new();
 
@@ -65,6 +66,17 @@ fn main() {
         }
     }
 
+    read_lines_and_save_changes(time_sorted_lines, first_tick, &mut changes);
+
+    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(changes, app_args.start_date_time, app_args.vlog_tlcfi_mapping_file);
+
+    let mut file = File::create("test.vlg").unwrap();
+    for msg in vlog_messages {
+        write!(file, "{}\r\n", msg).unwrap();
+    }
+}
+
+fn read_lines_and_save_changes(time_sorted_lines: Vec<String>, mut first_tick: Option<u64>, changes: &mut Vec<TimestampedChanges>) {
     for line in time_sorted_lines {
         let filtered_line = line.replace("\"\"", "\"");
         let split_line: Vec<&str> = filtered_line.split("- ").collect();
@@ -78,20 +90,13 @@ fn main() {
         // Only consider message from the TLC.
         if split_line[1].contains("IN") {
             if first_tick == Option::None {
-                first_tick = tlcfi_parsing::tlcfi_parsing::find_first_tick(&split_line[2]);
+                first_tick = tlcfi_parsing::find_first_tick(&split_line[2]);
             }
             if first_tick != Option::None {
-                let timestamped_changes_res = tlcfi_parsing::tlcfi_parsing::parse_string(split_line[2], first_tick.unwrap());
+                let timestamped_changes_res = tlcfi_parsing::parse_string(split_line[2], first_tick.unwrap());
                 changes.extend(timestamped_changes_res.unwrap());
             }
         }
-    }
-
-    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(changes, app_args.start_date_time, app_args.vlog_tlcfi_mapping_file);
-
-    let mut file = File::create("test.vlg").unwrap();
-    for msg in vlog_messages {
-        write!(file, "{}\r\n", msg).unwrap();
     }
 }
 
