@@ -68,7 +68,7 @@ fn main() {
 
     read_lines_and_save_changes(time_sorted_lines, first_tick, &mut changes);
 
-    let vlog_messages = vlog_transformer::vlog_transformer::to_vlog(changes, app_args.start_date_time, app_args.vlog_tlcfi_mapping_file);
+    let vlog_messages = vlog_transformer::to_vlog(changes, app_args.start_date_time, app_args.vlog_tlcfi_mapping_file);
 
     let mut file = File::create("test.vlg").unwrap();
     for msg in vlog_messages {
