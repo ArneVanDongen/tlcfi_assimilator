@@ -16,6 +16,7 @@ const TIME_REFERENCE_INTERVAL_IN_S: i64 = 300;
 // TODO handle unwraps
 // TODO get rid of some to_string calls in favor of &str
 // TODO implement status messages every 5 minutes with the time reference messages. first handle all changes, and save the first change state of any entity, then build initial status message on that and insert in front
+// TODO merge common functionality of transform_signal_changes and transform_detector_changes
 
 /// Transforms the given Vec of [TimestampedChanges](struct.TimestampedChanges.html) into a Vec of Strings representing VLog3 messages.
 /// Other than the direct transformation of [TimestampedChanges](struct.TimestampedChanges.html) to change messages, an initial VLog info message is inserted in front.
@@ -212,6 +213,7 @@ fn transform_detector_changes(
     format!("{}{}", static_string, dynamic_string)
 }
 
+/// tlcfi time is in milliseconds, vlog time is in deciseconds
 fn from_tlcfi_time_to_vlog_time(tlcfi_time: i64) -> i64 {
     tlcfi_time / 100
 }
@@ -277,4 +279,85 @@ fn get_vlog_info(tlc_name: String) -> String {
     }
     let vlog_info = format!("{:02X}{}{}", 4, "030000", &encoded_tlc_name);
     vlog_info
+}
+
+mod test {
+    use std::str::FromStr;
+
+    use super::*;
+    use tlcfi_assimilator;
+
+    fn get_test_tlc_name() -> String {
+        String::from("test")
+    }
+
+    fn get_test_start_date_time() -> NaiveDateTime {
+        NaiveDateTime::parse_from_str("2021-12-15T11:00:00.000", "%FT%T%.3f")
+            .expect("Use a valid time stamp for tests!")
+    }
+
+    fn get_test_vlog_signal_name_mapping() -> HashMap<String, i16> {
+        [("71".to_string(), 0), ("11".to_string(), 1)].iter().cloned().collect()
+    }
+
+    fn get_test_vlog_detector_name_mapping() -> HashMap<String, i16> {
+        [("D712".to_string(), 4), ("D713".to_string(), 2)].iter().cloned().collect()
+    }
+
+    #[test]
+    fn get_vlog_info_should_transform_tlc_name_into_vlog_hex_message() {
+        let expected_vlog_info = "040300007465737420202020202020202020202020202020";
+        let actual_vlog_info = get_vlog_info(get_test_tlc_name());
+        assert_eq!(actual_vlog_info, expected_vlog_info);
+    }
+
+    #[test]
+    fn get_time_reference_should_create_a_time_reference_message_based_on_the_ms_since_beginning() {
+        let expected_time_reference = "012021121511000520";
+        let actual_time_reference = get_time_reference(get_test_start_date_time(), 5212);
+        assert_eq!(actual_time_reference, expected_time_reference);
+    }
+
+    #[test]
+    fn from_tlcfi_time_to_vlog_time_should_transform_ms_into_ds() {
+        let ms = 3400;
+        let ds = 34;
+        assert_eq!(from_tlcfi_time_to_vlog_time(ms), ds);
+    }
+
+    #[test]
+    fn transform_signal_changes_should_create_a_vlog_signal_change_message() {
+        let expected_signal_change_message = "0E003200000102";
+        let detector_changes = TimestampedChanges {
+            ms_from_beginning: 530,
+            signal_names: vec!["11".to_string(), "71".to_string()],
+            signal_states: vec![
+                tlcfi_assimilator::SignalState::AMBER,
+                tlcfi_assimilator::SignalState::RED,
+            ],
+            ..Default::default()
+        };
+
+        let actual_signal_change_message = transform_signal_changes(detector_changes, &get_test_vlog_signal_name_mapping(), 180);
+        
+        assert_eq!(actual_signal_change_message, expected_signal_change_message);
+    }
+
+    #[test]
+    fn transform_detector_changes_should_create_a_vlog_sensor_change_message() {
+        let expected_sensor_change_message = "06005202000401";
+        let detector_changes = TimestampedChanges {
+            ms_from_beginning: 640,
+            detector_names: vec!["D712".to_string(), "D713".to_string()],
+            detector_states: vec![
+                tlcfi_assimilator::DetectorState::OCCUPIED,
+                tlcfi_assimilator::DetectorState::FREE,
+            ],
+            ..Default::default()
+        };
+
+        let actual_sensor_change_message = transform_detector_changes(detector_changes, &get_test_vlog_detector_name_mapping(), 80);
+        
+        assert_eq!(actual_sensor_change_message, expected_sensor_change_message);
+    }
 }
