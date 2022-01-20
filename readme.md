@@ -2,6 +2,8 @@
 
 Bij deze een voorlopige versie van de TLC-FI Assimilator. Hiermee kun je SmartTraffic logging van TLC-FI berichten omzetten in een vlog bestand.
 
+[![Coverage Status](https://coveralls.io/repos/github/ArneVanDongen/tlcfi_assimilator/badge.svg?branch=main)](https://coveralls.io/github/ArneVanDongen/tlcfi_assimilator?branch=main)
+
 ## Benodigdheden
 
 * Een bestand met tlc-fi logging; valt te halen uit GCP Logging met de volgende query: `resource.labels.container_name="prod-${namespace}-communications-tlcfimessages"`, of als je het lokaal draait uit het bestand `tlcFiMesssages.log`.
