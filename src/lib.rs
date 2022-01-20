@@ -4,16 +4,16 @@
 
 /// A set of changes with a time delta to the first decoded message in milliseconds.
 /// It will have either signal names and states, or detector names and states.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct TimestampedChanges {
-    pub ms_from_beginning: i64,
+    pub ms_from_beginning: u64,
     pub signal_names: Vec<String>,
     pub signal_states: Vec<SignalState>,
     pub detector_names: Vec<String>,
     pub detector_states: Vec<DetectorState>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SignalState {
     UNAVAILABLE,
     DARK,
@@ -22,7 +22,7 @@ pub enum SignalState {
     GREEN,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DetectorState {
     FREE,
     OCCUPIED,
