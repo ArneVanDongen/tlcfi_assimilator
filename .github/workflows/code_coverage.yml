@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           ls
-          ls tmp
+          ls target
           echo "path-to-lcov: $PATH_TO_LCOV"
         env:
           PATH_TO_LCOV: ${{ steps.coverage.outputs.report }}
