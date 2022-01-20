@@ -55,7 +55,7 @@ fn parse_change_json(
     mut timestamped_changes: Vec<TimestampedChanges>,
     change_type: ChangeType,
 ) -> Vec<TimestampedChanges> {
-    let ms_from_beginning = find_ms_from_beginning(&json_obj, first_tick) as i64;
+    let ms_from_beginning = find_ms_from_beginning(&json_obj, first_tick);
 
     let update = &json_obj["params"]["update"][0];
 

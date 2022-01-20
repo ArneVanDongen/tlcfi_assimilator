@@ -3,14 +3,14 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader}, convert::TryInto,
 };
 
 use chrono::{Datelike, Duration, NaiveDateTime, Timelike};
 
 use tlcfi_assimilator::TimestampedChanges;
 
-const TIME_REFERENCE_INTERVAL_IN_S: i64 = 300;
+const TIME_REFERENCE_INTERVAL_IN_S: u64 = 300;
 
 // TODO Create enum for message types
 // TODO handle unwraps
@@ -133,7 +133,7 @@ fn load_mappings(file_name: &str, mapping_type: &str) -> Result<HashMap<String, 
 fn transform_signal_changes(
     signal_changes: TimestampedChanges,
     vlog_signal_name_mapping: &HashMap<String, i16>,
-    ms_of_last_time_reference: i64,
+    ms_of_last_time_reference: u64,
 ) -> String {
     // The structure for a CHANGE_EXTERNAL_SIGNALGROUP_STATUS_WUS
     // description  hex digits
@@ -174,7 +174,7 @@ fn transform_signal_changes(
 fn transform_detector_changes(
     detector_changes: TimestampedChanges,
     vlog_detector_name_mapping: &HashMap<String, i16>,
-    ms_of_last_time_reference: i64,
+    ms_of_last_time_reference: u64,
 ) -> String {
     // The structure for a CHANGE_DETECTION_INFORMATION
     // description  hex digits
@@ -214,7 +214,7 @@ fn transform_detector_changes(
 }
 
 /// tlcfi time is in milliseconds, vlog time is in deciseconds
-fn from_tlcfi_time_to_vlog_time(tlcfi_time: i64) -> i64 {
+fn from_tlcfi_time_to_vlog_time(tlcfi_time: u64) -> u64 {
     tlcfi_time / 100
 }
 
@@ -225,7 +225,7 @@ fn insert_vlog_statuses(start_date_time: NaiveDateTime, tlc_name: String) -> Vec
     ]
 }
 
-fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: i64) -> String {
+fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: u64) -> String {
     // #Tijd referentiebericht zie 2.1.
     // 012021043008002450
     // Elements of the time are encoded in a way that they are readable
@@ -239,7 +239,7 @@ fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: i64) -
     // Tenths   7  -  4
     // empty    3  -  0
     let reference_time = start_date_time
-        .checked_add_signed(Duration::milliseconds(ms_since_beginning))
+        .checked_add_signed(Duration::milliseconds(ms_since_beginning.try_into().unwrap()))
         .unwrap();
     let date_string = format!(
         "{:02}{:02}{:02}",
@@ -282,7 +282,6 @@ fn get_vlog_info(tlc_name: String) -> String {
 }
 
 mod test {
-    use std::str::FromStr;
 
     use super::*;
     use tlcfi_assimilator;
