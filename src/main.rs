@@ -266,6 +266,11 @@ mod test {
         run_with_args(app_args);
         let actual_vlog_output =  read_to_string("./test.vlg").unwrap();
 
-        assert_eq!(actual_vlog_output, expected_vlog_output);
+        let mut expected_lines = Vec::new();
+        expected_lines.extend(expected_vlog_output.split_whitespace().into_iter());
+        for (i, actual_line) in actual_vlog_output.split_whitespace().enumerate() {
+            assert_eq!(actual_line, expected_lines[i]);
+            println!("Compared actual line {:?}, with expected line {:?}", actual_line, expected_lines[i]);
+        }
     }
 }
