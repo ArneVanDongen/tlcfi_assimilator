@@ -31,16 +31,18 @@ jobs:
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
           RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
       - uses: actions-rs/grcov@v0.1
-      - name: Check path-to-lcov
-        shell: bash
-        run: |
-          ls
-          echo "path-to-lcov: $PATH_TO_LCOV"
-          echo ${{ steps.coverage.outputs.report }}
-        env:
-          PATH_TO_LCOV: ${{ steps.coverage.outputs.report }}
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path-to-lcov: ./lcov.info
+          
+  finish:
+    needs: coverage
+    runs-on: ubuntu-latest
+    steps:
+    - name: Coveralls Finished
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.github_token }}
+        parallel-finished: true
