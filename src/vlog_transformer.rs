@@ -2,8 +2,9 @@
 
 use std::{
     collections::HashMap,
+    convert::TryInto,
     fs::File,
-    io::{BufRead, BufReader}, convert::TryInto,
+    io::{BufRead, BufReader},
 };
 
 use chrono::{Datelike, Duration, NaiveDateTime, Timelike};
@@ -13,7 +14,6 @@ use tlcfi_assimilator::TimestampedChanges;
 const TIME_REFERENCE_INTERVAL_IN_S: u64 = 300;
 
 // TODO Create enum for message types
-// TODO handle unwraps
 // TODO get rid of some to_string calls in favor of &str
 // TODO implement status messages every 5 minutes with the time reference messages. first handle all changes, and save the first change state of any entity, then build initial status message on that and insert in front
 // TODO merge common functionality of transform_signal_changes and transform_detector_changes
@@ -30,11 +30,22 @@ pub fn to_vlog(
     start_date_time: NaiveDateTime,
     vlog_tlcfi_mapping_file: String,
 ) -> Vec<String> {
-    let tlc_name = load_tlc_name(&vlog_tlcfi_mapping_file).unwrap();
+    let tlc_name = load_tlc_name(&vlog_tlcfi_mapping_file).expect(&format!(
+        "Couldn't find a TLC name in the given VLog TLC FI mapping file: {:?}",
+        &vlog_tlcfi_mapping_file
+    ));
     println!("Found tlc name: {}", tlc_name);
-    let vlog_signal_name_mapping = load_mappings(&vlog_tlcfi_mapping_file, "Signals").unwrap();
+    let vlog_signal_name_mapping =
+        load_mappings(&vlog_tlcfi_mapping_file, "Signals").expect(&format!(
+            "Couldn't find Signal mappings in the given VLog TLC FI mapping file: {:?}",
+            &vlog_tlcfi_mapping_file
+        ));
     println!("Found signal mapping: {:#?}", &vlog_signal_name_mapping);
-    let vlog_detector_name_mapping = load_mappings(&vlog_tlcfi_mapping_file, "Detectors").unwrap();
+    let vlog_detector_name_mapping =
+        load_mappings(&vlog_tlcfi_mapping_file, "Detectors").expect(&format!(
+            "Couldn't find Detector mappings in the given VLog TLC FI mapping file: {:?}",
+            &vlog_tlcfi_mapping_file
+        ));
     println!("Found detector mapping: {:#?}", &vlog_detector_name_mapping);
 
     let mut vlog_messages: Vec<String> = Vec::new();
@@ -71,40 +82,47 @@ pub fn to_vlog(
     vlog_messages
 }
 
-fn load_tlc_name(file_name: &str) -> Result<String, String> {
-    let mapping_file = File::open(file_name).unwrap();
+fn load_tlc_name(file_name: &str) -> Option<String> {
+    let mapping_file = File::open(file_name).expect(&format!(
+        "Failed to open VLog TLC FI mapping file: {:?}",
+        &file_name
+    ));
 
     let reader = BufReader::new(mapping_file);
     let mut tlc_name = Option::None;
     let mut next_line_has_info = false;
-    for line in reader.lines() {
-        let read_line = line.unwrap().trim().to_string();
-        if !next_line_has_info && read_line.contains("//") && read_line.contains("TLC") {
-            next_line_has_info = true;
-        }
-        if next_line_has_info {
-            if !read_line.contains("//") && !read_line.is_empty() {
-                tlc_name = Some(read_line.to_string());
-                break;
+    for line_res in reader.lines() {
+        if let Ok(line) = line_res {
+            let read_line = line.trim().to_string();
+            if !next_line_has_info && read_line.contains("//") && read_line.contains("TLC") {
+                next_line_has_info = true;
             }
+            if next_line_has_info {
+                if !read_line.contains("//") && !read_line.is_empty() {
+                    tlc_name = Some(read_line.to_string());
+                    break;
+                }
+            }
+        } else {
+            eprintln!("Failed to read line {:?}", line_res)
         }
     }
 
-    match tlc_name {
-        Some(name) => Ok(name),
-        None => Err("We didn't find a tlc name!".to_string()),
-    }
+    tlc_name
 }
 
-fn load_mappings(file_name: &str, mapping_type: &str) -> Result<HashMap<String, i16>, String> {
-    let mapping_file = File::open(file_name).unwrap();
+fn load_mappings(
+    file_name: &str,
+    mapping_type: &str,
+) -> Result<HashMap<String, i16>, Box<dyn std::error::Error>> {
+    let mapping_file = File::open(file_name)?;
 
     let reader = BufReader::new(mapping_file);
     let mut mappings = HashMap::new();
 
     let mut next_line_has_info = false;
     for line in reader.lines() {
-        let read_line = line.unwrap().trim().to_string();
+        let read_line = line?.trim().to_string();
 
         if !next_line_has_info && read_line.contains("//") && read_line.contains(mapping_type) {
             next_line_has_info = true;
@@ -112,7 +130,7 @@ fn load_mappings(file_name: &str, mapping_type: &str) -> Result<HashMap<String, 
             let mapping: Vec<&str> = read_line.split(",").collect();
             mappings.insert(
                 mapping[1].trim().to_string(),
-                mapping[0].trim().parse::<i16>().unwrap(),
+                mapping[0].trim().parse::<i16>()?,
             );
         } else if next_line_has_info {
             // "Stopping file parsings since we found an empty line when we expected info."
@@ -121,10 +139,10 @@ fn load_mappings(file_name: &str, mapping_type: &str) -> Result<HashMap<String, 
     }
 
     if mappings.is_empty() {
-        Err(format!(
-            "No {} mappings found in the mapping file!",
-            mapping_type
-        ))
+        Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("No {} mappings found in the mapping file!", mapping_type),
+        )))
     } else {
         Ok(mappings)
     }
@@ -158,9 +176,20 @@ fn transform_signal_changes(
         .signal_names
         .iter()
         .enumerate()
-        .map(|(index, name)| (index, vlog_signal_name_mapping.get(name as &str).unwrap()))
+        .map(|(index, name)| {
+            (
+                index,
+                vlog_signal_name_mapping.get(name as &str).expect(&format!(
+                    "Couldn't find TLC FI signal name '{:?}' in VLog mapping file",
+                    name
+                )),
+            )
+        })
         .collect();
-    vlog_ids_in_message.sort_by(|(_, id1), (_, id2)| id1.partial_cmp(id2).unwrap());
+    vlog_ids_in_message.sort_by(|(_, id1), (_, id2)| {
+        id1.partial_cmp(id2)
+            .expect("Failed to compare VLog ids. This should never happen.")
+    });
     for (index, signal_id) in vlog_ids_in_message {
         dynamic_string.push_str(&format!(
             "{:02X}{:02X}",
@@ -200,9 +229,22 @@ fn transform_detector_changes(
         .detector_names
         .iter()
         .enumerate()
-        .map(|(index, name)| (index, vlog_detector_name_mapping.get(name as &str).unwrap()))
+        .map(|(index, name)| {
+            (
+                index,
+                vlog_detector_name_mapping
+                    .get(name as &str)
+                    .expect(&format!(
+                        "Couldn't find TLC FI detector name '{:?}' in VLog mapping file",
+                        name
+                    )),
+            )
+        })
         .collect();
-    vlog_ids_in_message.sort_by(|(_, id1), (_, id2)| id1.partial_cmp(id2).unwrap());
+    vlog_ids_in_message.sort_by(|(_, id1), (_, id2)| {
+        id1.partial_cmp(id2)
+            .expect("Failed to compare VLog ids. This should never happen.")
+    });
     for (index, vlog_id) in vlog_ids_in_message {
         dynamic_string.push_str(&format!(
             "{:02X}{:02X}",
@@ -239,8 +281,15 @@ fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: u64) -
     // Tenths   7  -  4
     // empty    3  -  0
     let reference_time = start_date_time
-        .checked_add_signed(Duration::milliseconds(ms_since_beginning.try_into().unwrap()))
-        .unwrap();
+        .checked_add_signed(Duration::milliseconds(
+            ms_since_beginning
+                .try_into()
+                .expect("Failed to convert u64 into i64"),
+        ))
+        .expect(&format!(
+            "Adding {:?} to date time {:?} caused an overflow error. Is our input correct?",
+            ms_since_beginning, start_date_time
+        ));
     let date_string = format!(
         "{:02}{:02}{:02}",
         reference_time.year(),
@@ -296,11 +345,17 @@ mod test {
     }
 
     fn get_test_vlog_signal_name_mapping() -> HashMap<String, i16> {
-        [("71".to_string(), 0), ("11".to_string(), 1)].iter().cloned().collect()
+        [("71".to_string(), 0), ("11".to_string(), 1)]
+            .iter()
+            .cloned()
+            .collect()
     }
 
     fn get_test_vlog_detector_name_mapping() -> HashMap<String, i16> {
-        [("D712".to_string(), 4), ("D713".to_string(), 2)].iter().cloned().collect()
+        [("D712".to_string(), 4), ("D713".to_string(), 2)]
+            .iter()
+            .cloned()
+            .collect()
     }
 
     #[test]
@@ -337,8 +392,9 @@ mod test {
             ..Default::default()
         };
 
-        let actual_signal_change_message = transform_signal_changes(detector_changes, &get_test_vlog_signal_name_mapping(), 180);
-        
+        let actual_signal_change_message =
+            transform_signal_changes(detector_changes, &get_test_vlog_signal_name_mapping(), 180);
+
         assert_eq!(actual_signal_change_message, expected_signal_change_message);
     }
 
@@ -355,8 +411,12 @@ mod test {
             ..Default::default()
         };
 
-        let actual_sensor_change_message = transform_detector_changes(detector_changes, &get_test_vlog_detector_name_mapping(), 80);
-        
+        let actual_sensor_change_message = transform_detector_changes(
+            detector_changes,
+            &get_test_vlog_detector_name_mapping(),
+            80,
+        );
+
         assert_eq!(actual_sensor_change_message, expected_sensor_change_message);
     }
 }
