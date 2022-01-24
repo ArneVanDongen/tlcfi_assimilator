@@ -1,5 +1,5 @@
 use std::{
-    fs::{File, read_to_string},
+    fs::{read_to_string, File},
     io::{BufRead, BufReader, Write},
 };
 
@@ -26,7 +26,6 @@ ARGS:
   <VLOG_TLCFI_MAPPING_FILE>
 ";
 
-// TODO handle all unwraps properly
 // TODO extract tlcfi parsing to a different module
 // TODO retrieve the start time of the logs
 // TODO give the vlog file the correct name
@@ -54,17 +53,22 @@ fn main() {
 }
 
 fn run_with_args(app_args: AppArgs) {
-    let tlcfi_log_file = File::open(app_args.tlcfi_log_file).unwrap();
+    let tlcfi_log_file = File::open(app_args.tlcfi_log_file)
+        .expect("Couldn't open the given file path for the TLC FI logs");
     let reader = BufReader::new(tlcfi_log_file);
     let first_tick = Option::None;
     let mut changes: Vec<TimestampedChanges> = Vec::new();
     let mut time_sorted_lines = Vec::new();
 
-    for line in reader.lines() {
-        if app_args.is_chronological {
-            time_sorted_lines.push(line.unwrap());
+    for line_res in reader.lines() {
+        if let Ok(line) = line_res {
+            if app_args.is_chronological {
+                time_sorted_lines.push(line);
+            } else {
+                time_sorted_lines.insert(0, line);
+            }
         } else {
-            time_sorted_lines.insert(0, line.unwrap());
+            eprintln!("Failed to read line {:?}", line_res)
         }
     }
 
@@ -74,9 +78,13 @@ fn run_with_args(app_args: AppArgs) {
         app_args.start_date_time,
         app_args.vlog_tlcfi_mapping_file,
     );
-    let mut file = File::create("test.vlg").unwrap();
+    let mut file = File::create("test.vlg")
+        .expect("Failed to create the file 'test.vlg' for saving the VLog output.");
     for msg in vlog_messages {
-        write!(file, "{}\r\n", msg).unwrap();
+        write!(file, "{}\r\n", msg).expect(&format!(
+            "Failed to write line {:?} to the VLog output file.",
+            msg
+        ));
     }
 }
 
@@ -103,10 +111,17 @@ fn read_lines_and_save_changes(
             if first_tick == Option::None {
                 first_tick = tlcfi_parsing::find_first_tick(&split_line[2]);
             }
-            if first_tick != Option::None {
-                let timestamped_changes_res =
-                    tlcfi_parsing::parse_string(split_line[2], first_tick.unwrap());
-                changes.extend(timestamped_changes_res.unwrap());
+            if let Some(first_tick) = first_tick {
+
+                if let Ok(timestamped_changes_res) =
+                    tlcfi_parsing::parse_string(split_line[2], first_tick)
+                {
+                    changes.extend(timestamped_changes_res)
+                } else {
+                    eprintln!("Failed to parse string {:?} with first tick {:?}", split_line[2], first_tick)
+                }
+            } else {
+                eprintln!("Didn't find a first tick yet!")
             }
         }
     }
@@ -264,13 +279,12 @@ mod test {
         };
 
         run_with_args(app_args);
-        let actual_vlog_output =  read_to_string("./test.vlg").unwrap();
+        let actual_vlog_output = read_to_string("./test.vlg").unwrap();
 
         let mut expected_lines = Vec::new();
         expected_lines.extend(expected_vlog_output.split_whitespace().into_iter());
         for (i, actual_line) in actual_vlog_output.split_whitespace().enumerate() {
             assert_eq!(actual_line, expected_lines[i]);
-            println!("Compared actual line {:?}, with expected line {:?}", actual_line, expected_lines[i]);
         }
     }
 }
