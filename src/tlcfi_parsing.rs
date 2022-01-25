@@ -23,7 +23,7 @@ pub fn find_first_tick(first_line_json: &str) -> Option<u64> {
 pub fn parse_string(json_str: &str, first_tick: u64) -> Result<Vec<TimestampedChanges>, String> {
     let json_res = parse(json_str);
     match json_res {
-        Ok(json_obj) => Ok(parse_json(json_obj, first_tick)?),
+        Ok(json_obj) => parse_json(json_obj, first_tick),
         Err(_) => Err("Failed to parse json string".to_string()),
     }
 }
@@ -52,7 +52,8 @@ fn parse_json(json_obj: JsonValue, first_tick: u64) -> Result<Vec<TimestampedCha
             timestamped_changes,
             ChangeType::Detector,
         ),
-        _ => Err(format!("Can't handle message type {}", message_type)),
+        // There are many valid message types we don't support (yet)
+        _ => Ok(Vec::new()),
     }
 }
 
