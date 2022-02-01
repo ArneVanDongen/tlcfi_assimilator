@@ -27,13 +27,10 @@ const TIME_REFERENCE_INTERVAL_IN_S: u64 = 300;
 /// * 14 - Externe signaalgroep status
 pub fn to_vlog(
     timestamped_changes_vec: Vec<TimestampedChanges>,
-    start_date_time: NaiveDateTime,
-    vlog_tlcfi_mapping_file: String,
+    start_date_time: &NaiveDateTime,
+    vlog_tlcfi_mapping_file: &str,
+    tlc_name: &str
 ) -> Vec<String> {
-    let tlc_name = load_tlc_name(&vlog_tlcfi_mapping_file).expect(&format!(
-        "Couldn't find a TLC name in the given VLog TLC FI mapping file: {:?}",
-        &vlog_tlcfi_mapping_file
-    ));
     println!("Found tlc name: {}", tlc_name);
     let vlog_signal_name_mapping =
         load_mappings(&vlog_tlcfi_mapping_file, "Signals").expect(&format!(
@@ -82,7 +79,7 @@ pub fn to_vlog(
     vlog_messages
 }
 
-fn load_tlc_name(file_name: &str) -> Option<String> {
+pub fn load_tlc_name(file_name: &str) -> Option<String> {
     let mapping_file = File::open(file_name).expect(&format!(
         "Failed to open VLog TLC FI mapping file: {:?}",
         &file_name
@@ -260,14 +257,14 @@ fn from_tlcfi_time_to_vlog_time(tlcfi_time: u64) -> u64 {
     tlcfi_time / 100
 }
 
-fn insert_vlog_statuses(start_date_time: NaiveDateTime, tlc_name: String) -> Vec<String> {
+fn insert_vlog_statuses(start_date_time: &NaiveDateTime, tlc_name: &str) -> Vec<String> {
     vec![
         get_time_reference(start_date_time, 0),
         get_vlog_info(tlc_name),
     ]
 }
 
-fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: u64) -> String {
+fn get_time_reference(start_date_time: &NaiveDateTime, ms_since_beginning: u64) -> String {
     // #Tijd referentiebericht zie 2.1.
     // 012021043008002450
     // Elements of the time are encoded in a way that they are readable
@@ -307,7 +304,7 @@ fn get_time_reference(start_date_time: NaiveDateTime, ms_since_beginning: u64) -
     time_reference
 }
 
-fn get_vlog_info(tlc_name: String) -> String {
+fn get_vlog_info(tlc_name: &str) -> String {
     // # V-Log informatie, zie 2.3
     // Has the following format <type><versie><vri_id>
     // message type is 4
@@ -333,11 +330,8 @@ fn get_vlog_info(tlc_name: String) -> String {
 mod test {
 
     use super::*;
-    use tlcfi_assimilator;
 
-    fn get_test_tlc_name() -> String {
-        String::from("test")
-    }
+    const TEST_TLC_NAME: &str = "test";
 
     fn get_test_start_date_time() -> NaiveDateTime {
         NaiveDateTime::parse_from_str("2021-12-15T11:00:00.000", "%FT%T%.3f")
@@ -361,14 +355,14 @@ mod test {
     #[test]
     fn get_vlog_info_should_transform_tlc_name_into_vlog_hex_message() {
         let expected_vlog_info = "040300007465737420202020202020202020202020202020";
-        let actual_vlog_info = get_vlog_info(get_test_tlc_name());
+        let actual_vlog_info = get_vlog_info(TEST_TLC_NAME);
         assert_eq!(actual_vlog_info, expected_vlog_info);
     }
 
     #[test]
     fn get_time_reference_should_create_a_time_reference_message_based_on_the_ms_since_beginning() {
         let expected_time_reference = "012021121511000520";
-        let actual_time_reference = get_time_reference(get_test_start_date_time(), 5212);
+        let actual_time_reference = get_time_reference(&get_test_start_date_time(), 5212);
         assert_eq!(actual_time_reference, expected_time_reference);
     }
 
@@ -386,8 +380,8 @@ mod test {
             ms_from_beginning: 530,
             signal_names: vec!["11".to_string(), "71".to_string()],
             signal_states: vec![
-                tlcfi_assimilator::SignalState::AMBER,
-                tlcfi_assimilator::SignalState::RED,
+                tlcfi_assimilator::SignalState::Amber,
+                tlcfi_assimilator::SignalState::Red,
             ],
             ..Default::default()
         };

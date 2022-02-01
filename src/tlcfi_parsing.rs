@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use json::{parse, JsonValue};
 
 use tlcfi_assimilator::TimestampedChanges;
@@ -206,7 +204,7 @@ mod test {
         let expected_changes = vec![tlcfi_assimilator::TimestampedChanges {
             ms_from_beginning: 864,
             signal_names: vec!["71".to_string()],
-            signal_states: vec![tlcfi_assimilator::SignalState::GREEN],
+            signal_states: vec![tlcfi_assimilator::SignalState::Green],
             ..Default::default()
         }];
 
