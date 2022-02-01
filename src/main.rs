@@ -27,8 +27,6 @@ ARGS:
   <VLOG_TLCFI_MAPPING_FILE>
 ";
 
-// TODO retrieve the start time of the logs
-
 /// The entry point for this program
 ///
 /// Expects a file `tlcfi.txt` (or the one given in command args) with lines looking like s:
@@ -52,41 +50,34 @@ fn main() {
 }
 
 fn run_with_args(app_args: AppArgs) {
-    let tlcfi_log_file = File::open(app_args.tlcfi_log_file)
-        .expect("Couldn't open the given file path for the TLC FI logs");
-    let reader = BufReader::new(tlcfi_log_file);
+    let start_time = &app_args
+        .start_date_time
+        .expect("Start date and time must be known by now");
     let first_tick = Option::None;
     let mut changes: Vec<TimestampedChanges> = Vec::new();
-    let mut time_sorted_lines = Vec::new();
 
-    for line_res in reader.lines() {
-        if let Ok(line) = line_res {
-            if app_args.is_chronological {
-                time_sorted_lines.push(line);
-            } else {
-                time_sorted_lines.insert(0, line);
-            }
-        } else {
-            eprintln!("Failed to read line {:?}", line_res)
-        }
-    }
+    let time_sorted_lines = sort_lines(&app_args.tlcfi_log_file, &app_args.is_chronological);
 
     read_lines_and_save_changes(time_sorted_lines, first_tick, &mut changes);
-    let tlc_name = vlog_transformer::load_tlc_name(&app_args.vlog_tlcfi_mapping_file).expect(&format!(
-        "Couldn't find a TLC name in the given VLog TLC FI mapping file: {:?}",
-        &app_args.vlog_tlcfi_mapping_file
-    ));
+    let tlc_name =
+        vlog_transformer::load_tlc_name(&app_args.vlog_tlcfi_mapping_file).expect(&format!(
+            "Couldn't find a TLC name in the given VLog TLC FI mapping file: {:?}",
+            &app_args.vlog_tlcfi_mapping_file
+        ));
+
     let vlog_messages = vlog_transformer::to_vlog(
         changes,
-        &app_args.start_date_time,
+        start_time,
         &app_args.vlog_tlcfi_mapping_file,
-        &tlc_name
+        &tlc_name,
     );
 
-    let file_name = create_file_name(&tlc_name, &app_args.start_date_time);
+    let file_name = create_file_name(&tlc_name, start_time);
 
-    let mut file = File::create(&file_name)
-        .expect(&format!("Failed to create the file '{}' for saving the VLog output.", &file_name));
+    let mut file = File::create(&file_name).expect(&format!(
+        "Failed to create the file '{}' for saving the VLog output.",
+        &file_name
+    ));
     println!("Created file: {}", &file_name);
 
     for msg in vlog_messages {
@@ -95,6 +86,24 @@ fn run_with_args(app_args: AppArgs) {
             msg
         ));
     }
+}
+
+fn sort_lines(tlcfi_log_file: &str, is_chronological: &bool) -> Vec<String> {
+    let tlcfi_log_file = File::open(tlcfi_log_file).expect("Couldn't open the given file path for the TLC FI logs");
+    let reader = BufReader::new(tlcfi_log_file);
+    let mut time_sorted_lines = Vec::new();
+    for line_res in reader.lines() {
+        if let Ok(line) = line_res {
+            if *is_chronological {
+                time_sorted_lines.push(line);
+            } else {
+                time_sorted_lines.insert(0, line);
+            }
+        } else {
+            eprintln!("Failed to read line {:?}", line_res)
+        }
+    }
+    time_sorted_lines
 }
 
 fn read_lines_and_save_changes(
@@ -121,13 +130,15 @@ fn read_lines_and_save_changes(
                 first_tick = tlcfi_parsing::find_first_tick(&split_line[2]);
             }
             if let Some(first_tick) = first_tick {
-
                 if let Ok(timestamped_changes_res) =
                     tlcfi_parsing::parse_string(split_line[2], first_tick)
                 {
                     changes.extend(timestamped_changes_res)
                 } else {
-                    eprintln!("Failed to parse string {:?} with first tick {:?}", split_line[2], first_tick)
+                    eprintln!(
+                        "Failed to parse string {:?} with first tick {:?}",
+                        split_line[2], first_tick
+                    )
                 }
             } else {
                 eprintln!("Didn't find a first tick yet!")
@@ -138,7 +149,7 @@ fn read_lines_and_save_changes(
 
 fn create_file_name(tlc_name: &str, start_date_time: &NaiveDateTime) -> String {
     let date_part = start_date_time.date().to_string().replace("-", "");
-    let time_part = start_date_time.time().to_string().replace(":", "");
+    let time_part = &start_date_time.time().to_string().replace(":", "")[0..6];
     String::from(tlc_name) + "_" + &date_part + "_" + &time_part + ".vlg"
 }
 
@@ -150,28 +161,62 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
         std::process::exit(0);
     }
 
-    let args = AppArgs {
+    let mut args = AppArgs {
         is_chronological: pargs
             .opt_value_from_str("--chronological")?
             .unwrap_or(false),
-        start_date_time: pargs.value_from_fn("--start-date-time", parse_date_time)?,
+        start_date_time: pargs.opt_value_from_fn("--start-date-time", parse_date_time)?,
         tlcfi_log_file: pargs
             .opt_value_from_fn("--tlcfi-log-file", check_file_existence)?
             .unwrap_or("tlcfi.txt".to_string()),
         vlog_tlcfi_mapping_file: pargs.free_from_fn(check_file_existence)?,
     };
 
+    if args.start_date_time == None {
+        args.start_date_time = Some(get_start_date_time_from_file(
+            &args.is_chronological,
+            &args.tlcfi_log_file,
+        )?);
+    }
     Ok(args)
 }
 
-fn parse_date_time(arg: &str) -> Result<chrono::NaiveDateTime, String> {
+fn parse_date_time(arg: &str) -> Result<NaiveDateTime, String> {
     // <Year-month-day format (ISO 8601). Same to %Y-%m-%d><T><Hour-minute-second format. Same to %H:%M:%S><Similar to .%f but left-aligned. These all consume the leading dot.>
-    match chrono::NaiveDateTime::parse_from_str(arg, "%FT%T%.3f") {
+    match NaiveDateTime::parse_from_str(arg, "%FT%T%.3f") {
         Ok(date_time) => Ok(date_time),
         Err(error) => Err(format!(
             "Failed to transform argument {} into a date time:\n{}",
             arg, error
         )),
+    }
+}
+
+fn get_start_date_time_from_file(
+    is_chronological: &bool,
+    tlcfi_log_file: &str,
+) -> Result<NaiveDateTime, pico_args::Error> {
+    let sorted_lines = sort_lines(tlcfi_log_file, is_chronological);
+
+    let mut date_time_bit = String::new();
+    for line in sorted_lines {
+        let split_line: Vec<&str> = line.split("- ").collect();
+
+        // if it is a logline
+        if line.len() >= 23 && split_line.len() == 3 {
+            date_time_bit = line[0..23].to_string();
+            break
+        }
+    }
+
+    date_time_bit = date_time_bit.replace(",", ".").replace(" ", "T");
+
+
+    match parse_date_time(&date_time_bit) {
+        Ok(date_time) => Ok(date_time),
+        Err(error) => Err(pico_args::Error::ArgumentParsingFailed {
+            cause: format!("--start-date-time wasn't given and we couldn't extract it from the log file. Failed with error: {}", error),
+        }),
     }
 }
 
@@ -188,7 +233,7 @@ fn check_file_existence(file_name: &str) -> Result<String, String> {
 #[derive(Debug)]
 struct AppArgs {
     is_chronological: bool,
-    start_date_time: chrono::NaiveDateTime,
+    start_date_time: Option<NaiveDateTime>,
     tlcfi_log_file: String,
     vlog_tlcfi_mapping_file: String,
 }
@@ -271,7 +316,8 @@ mod test {
     }
 
     #[test]
-    fn reading_a_valid_line_without_a_first_tick_should_set_the_first_tick_to_the_one_of_the_message() {
+    fn reading_a_valid_line_without_a_first_tick_should_set_the_first_tick_to_the_one_of_the_message(
+    ) {
         let lines = vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - IN - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087974612,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")];
         let first_tick = Option::None;
         let mut changes = Vec::new();
@@ -290,7 +336,27 @@ mod test {
         let vlog_file_name = create_file_name(tlc_name, &date_time);
 
         assert_eq!(vlog_file_name, "test_20211215_110000.vlg");
-    } 
+    }
+
+    #[test]
+    fn creating_a_vlog_file_name_should_remove_ms_from_time() {
+        let tlc_name = "test";
+        let date_time = NaiveDate::from_ymd(2021, 12, 15).and_hms_milli(11, 22, 33, 444);
+
+        let vlog_file_name = create_file_name(tlc_name, &date_time);
+
+        assert_eq!(vlog_file_name, "test_20211215_112233.vlg");
+    }
+
+    #[test]
+    fn getting_start_date_time_from_a_file_should_interpret_log_timestamps_as_naivedatetime(){
+        let expected_start_date_time = parse_date_time("2021-12-15T11:00:00.074").unwrap();
+
+        let start_date_time_from_log = get_start_date_time_from_file(&false, RELATIVE_TLCFI_FILE_PATH);
+
+        assert!(start_date_time_from_log.is_ok());
+        assert_eq!(start_date_time_from_log.unwrap(), expected_start_date_time);
+    }
 
     /// Uses input files ./tlcfi.txt and ./vlog_tlcfi_mapping.txt for an integration test, and compares it with an expected vlog output: ./expected_vlog_output.vlg
     #[test]
@@ -298,7 +364,7 @@ mod test {
         let expected_vlog_output = read_to_string("./expected_vlog_output.vlg").unwrap();
         let app_args = AppArgs {
             is_chronological: false,
-            start_date_time: get_test_start_time(),
+            start_date_time: Some(get_test_start_time()),
             tlcfi_log_file: RELATIVE_TLCFI_FILE_PATH.to_string(),
             vlog_tlcfi_mapping_file: RELATIVE_VLOG_MAPPING_FILE_PATH.to_string(),
         };
