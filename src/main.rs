@@ -145,7 +145,7 @@ fn read_lines_and_save_changes(
 
 fn create_file_name(tlc_name: &str, start_date_time: &NaiveDateTime) -> String {
     let date_part = start_date_time.date().to_string().replace("-", "");
-    let time_part = start_date_time.time().to_string().replace(":", "");
+    let time_part = &start_date_time.time().to_string().replace(":", "")[0..6];
     String::from(tlc_name) + "_" + &date_part + "_" + &time_part + ".vlg"
 }
 
@@ -157,7 +157,7 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
         std::process::exit(0);
     }
 
-    let args = AppArgs {
+    let mut args = AppArgs {
         is_chronological: pargs
             .opt_value_from_str("--chronological")?
             .unwrap_or(false),
@@ -310,13 +310,23 @@ mod test {
         assert_eq!(vlog_file_name, "test_20211215_110000.vlg");
     }
 
+    #[test]
+    fn creating_a_vlog_file_name_should_remove_ms_from_time() {
+        let tlc_name = "test";
+        let date_time =NaiveDate::from_ymd(2021, 12, 15).and_hms_milli(11, 22, 33, 444);
+
+        let vlog_file_name = create_file_name(tlc_name, &date_time);
+
+        assert_eq!(vlog_file_name, "test_20211215_112233.vlg");
+    }
+
     /// Uses input files ./tlcfi.txt and ./vlog_tlcfi_mapping.txt for an integration test, and compares it with an expected vlog output: ./expected_vlog_output.vlg
     #[test]
     fn integration_test() {
         let expected_vlog_output = read_to_string("./expected_vlog_output.vlg").unwrap();
         let app_args = AppArgs {
             is_chronological: false,
-            start_date_time: get_test_start_time(),
+            start_date_time: Some(get_test_start_time()),
             tlcfi_log_file: RELATIVE_TLCFI_FILE_PATH.to_string(),
             vlog_tlcfi_mapping_file: RELATIVE_VLOG_MAPPING_FILE_PATH.to_string(),
         };
