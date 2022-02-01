@@ -53,24 +53,10 @@ fn run_with_args(app_args: AppArgs) {
     let start_time = &app_args
         .start_date_time
         .expect("Start date and time must be known by now");
-    let tlcfi_log_file = File::open(app_args.tlcfi_log_file)
-        .expect("Couldn't open the given file path for the TLC FI logs");
-    let reader = BufReader::new(tlcfi_log_file);
     let first_tick = Option::None;
     let mut changes: Vec<TimestampedChanges> = Vec::new();
-    let mut time_sorted_lines = Vec::new();
 
-    for line_res in reader.lines() {
-        if let Ok(line) = line_res {
-            if app_args.is_chronological {
-                time_sorted_lines.push(line);
-            } else {
-                time_sorted_lines.insert(0, line);
-            }
-        } else {
-            eprintln!("Failed to read line {:?}", line_res)
-        }
-    }
+    let time_sorted_lines = sort_lines(&app_args.tlcfi_log_file, &app_args.is_chronological);
 
     read_lines_and_save_changes(time_sorted_lines, first_tick, &mut changes);
     let tlc_name =
@@ -100,6 +86,24 @@ fn run_with_args(app_args: AppArgs) {
             msg
         ));
     }
+}
+
+fn sort_lines(tlcfi_log_file: &str, is_chronological: &bool) -> Vec<String> {
+    let tlcfi_log_file = File::open(tlcfi_log_file).expect("Couldn't open the given file path for the TLC FI logs");
+    let reader = BufReader::new(tlcfi_log_file);
+    let mut time_sorted_lines = Vec::new();
+    for line_res in reader.lines() {
+        if let Ok(line) = line_res {
+            if *is_chronological {
+                time_sorted_lines.push(line);
+            } else {
+                time_sorted_lines.insert(0, line);
+            }
+        } else {
+            eprintln!("Failed to read line {:?}", line_res)
+        }
+    }
+    time_sorted_lines
 }
 
 fn read_lines_and_save_changes(
@@ -169,7 +173,10 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
     };
 
     if args.start_date_time == None {
-        args.start_date_time = Some(get_start_date_time_from_file()?);
+        args.start_date_time = Some(get_start_date_time_from_file(
+            &args.is_chronological,
+            &args.tlcfi_log_file,
+        )?);
     }
     Ok(args)
 }
@@ -185,11 +192,32 @@ fn parse_date_time(arg: &str) -> Result<NaiveDateTime, String> {
     }
 }
 
-fn get_start_date_time_from_file() -> Result<NaiveDateTime, pico_args::Error> {
-    Err(pico_args::Error::ArgumentParsingFailed {
-        cause: "--start-date-time wasn't given and we couldn't extract it from the log file"
-            .to_string(),
-    })
+fn get_start_date_time_from_file(
+    is_chronological: &bool,
+    tlcfi_log_file: &str,
+) -> Result<NaiveDateTime, pico_args::Error> {
+    let sorted_lines = sort_lines(tlcfi_log_file, is_chronological);
+
+    let mut date_time_bit = String::new();
+    for line in sorted_lines {
+        let split_line: Vec<&str> = line.split("- ").collect();
+
+        // if it is a logline
+        if line.len() >= 23 && split_line.len() == 3 {
+            date_time_bit = line[0..23].to_string();
+            break
+        }
+    }
+
+    date_time_bit = date_time_bit.replace(",", ".").replace(" ", "T");
+
+
+    match parse_date_time(&date_time_bit) {
+        Ok(date_time) => Ok(date_time),
+        Err(error) => Err(pico_args::Error::ArgumentParsingFailed {
+            cause: format!("--start-date-time wasn't given and we couldn't extract it from the log file. Failed with error: {}", error),
+        }),
+    }
 }
 
 fn check_file_existence(file_name: &str) -> Result<String, String> {
@@ -313,11 +341,21 @@ mod test {
     #[test]
     fn creating_a_vlog_file_name_should_remove_ms_from_time() {
         let tlc_name = "test";
-        let date_time =NaiveDate::from_ymd(2021, 12, 15).and_hms_milli(11, 22, 33, 444);
+        let date_time = NaiveDate::from_ymd(2021, 12, 15).and_hms_milli(11, 22, 33, 444);
 
         let vlog_file_name = create_file_name(tlc_name, &date_time);
 
         assert_eq!(vlog_file_name, "test_20211215_112233.vlg");
+    }
+
+    #[test]
+    fn getting_start_date_time_from_a_file_should_interpret_log_timestamps_as_naivedatetime(){
+        let expected_start_date_time = parse_date_time("2021-12-15T11:00:00.074").unwrap();
+
+        let start_date_time_from_log = get_start_date_time_from_file(&false, RELATIVE_TLCFI_FILE_PATH);
+
+        assert!(start_date_time_from_log.is_ok());
+        assert_eq!(start_date_time_from_log.unwrap(), expected_start_date_time);
     }
 
     /// Uses input files ./tlcfi.txt and ./vlog_tlcfi_mapping.txt for an integration test, and compares it with an expected vlog output: ./expected_vlog_output.vlg
