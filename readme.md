@@ -22,11 +22,12 @@ iV3013
 1, D612
 ```
 
-* Een tijdstempel in ISO 8601 formaat van de eerste tlc-fi log schrijving. Zet deze met de commando optie `start-date-time`, bijvoorbeeld: `--start-date-time 2021-12-15T12:57:13.130`.
+
 
 
 ## Optionele instellingen
 
+* Een tijdstempel in ISO 8601 formaat van wanneer het VLog bestand wat gemaakt wordt moet beginnen. Zet deze met de commando optie `start-date-time`, bijvoorbeeld: `--start-date-time 2021-12-15T12:57:13.130`. Standaard wordt er gezocht naar het tijdstempel van het vroegst weggeschreven logbericht in het logbestand.
 * Of het log bestand chronologisch is; dus van oud bovenaan naar nieuw onderaan. Standaard wordt er vanuit gegaan dat dit niet het geval is (dat is zo wanneer je logs uit GCP exporteert). Gebruik de commando optie `chronological` met een boolean waarde er achter. Bijvoorbeeld: `--chronological true`.
 * De bestandsnaam van de TLC-FI logging. Standaard wordt er gezocht naar een bestand `tlcfi.txt` maar je kunt het instellen met de commando optie `tlcfi-log-file`, bijvoorbeeld: `--tlcfi-log-file tlcfi-snippet.txt`.
 
