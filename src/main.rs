@@ -6,6 +6,7 @@ use std::{
 mod tlcfi_parsing;
 mod vlog_transformer;
 
+use chrono::NaiveDateTime;
 use tlcfi_assimilator::TimestampedChanges;
 
 const ARGS_HELP: &str = "\
@@ -26,9 +27,7 @@ ARGS:
   <VLOG_TLCFI_MAPPING_FILE>
 ";
 
-// TODO extract tlcfi parsing to a different module
 // TODO retrieve the start time of the logs
-// TODO give the vlog file the correct name
 
 /// The entry point for this program
 ///
@@ -73,13 +72,23 @@ fn run_with_args(app_args: AppArgs) {
     }
 
     read_lines_and_save_changes(time_sorted_lines, first_tick, &mut changes);
+    let tlc_name = vlog_transformer::load_tlc_name(&app_args.vlog_tlcfi_mapping_file).expect(&format!(
+        "Couldn't find a TLC name in the given VLog TLC FI mapping file: {:?}",
+        &app_args.vlog_tlcfi_mapping_file
+    ));
     let vlog_messages = vlog_transformer::to_vlog(
         changes,
-        app_args.start_date_time,
-        app_args.vlog_tlcfi_mapping_file,
+        &app_args.start_date_time,
+        &app_args.vlog_tlcfi_mapping_file,
+        &tlc_name
     );
-    let mut file = File::create("test.vlg")
-        .expect("Failed to create the file 'test.vlg' for saving the VLog output.");
+
+    let file_name = create_file_name(&tlc_name, &app_args.start_date_time);
+
+    let mut file = File::create(&file_name)
+        .expect(&format!("Failed to create the file '{}' for saving the VLog output.", &file_name));
+    println!("Created file: {}", &file_name);
+
     for msg in vlog_messages {
         write!(file, "{}\r\n", msg).expect(&format!(
             "Failed to write line {:?} to the VLog output file.",
@@ -125,6 +134,12 @@ fn read_lines_and_save_changes(
             }
         }
     }
+}
+
+fn create_file_name(tlc_name: &str, start_date_time: &NaiveDateTime) -> String {
+    let date_part = start_date_time.date().to_string().replace("-", "");
+    let time_part = start_date_time.time().to_string().replace(":", "");
+    String::from(tlc_name) + "_" + &date_part + "_" + &time_part + ".vlg"
 }
 
 fn parse_args() -> Result<AppArgs, pico_args::Error> {
@@ -267,6 +282,16 @@ mod test {
         assert_eq!(changes[0].ms_from_beginning, 0); // it being 0 means this is the very first message handled, and first tick is equal to it
     }
 
+    #[test]
+    fn creating_a_vlog_file_name_should_use_the_tlc_name_and_format_the_date_time_correctly() {
+        let tlc_name = "test";
+        let date_time = get_test_start_time();
+
+        let vlog_file_name = create_file_name(tlc_name, &date_time);
+
+        assert_eq!(vlog_file_name, "test_20211215_110000.vlg");
+    } 
+
     /// Uses input files ./tlcfi.txt and ./vlog_tlcfi_mapping.txt for an integration test, and compares it with an expected vlog output: ./expected_vlog_output.vlg
     #[test]
     fn integration_test() {
@@ -279,7 +304,7 @@ mod test {
         };
 
         run_with_args(app_args);
-        let actual_vlog_output = read_to_string("./test.vlg").unwrap();
+        let actual_vlog_output = read_to_string("./3031_20211215_110000.vlg").unwrap();
 
         let mut expected_lines = Vec::new();
         expected_lines.extend(expected_vlog_output.split_whitespace().into_iter());

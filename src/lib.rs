@@ -15,11 +15,12 @@ pub struct TimestampedChanges {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SignalState {
-    UNAVAILABLE,
-    DARK,
-    RED,
-    AMBER,
-    GREEN,
+    Unavailable,
+    Dark,
+    Red,
+    Amber,
+    Green,
+    AmberFlashing,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -36,11 +37,12 @@ impl From<u64> for SignalState {
     /// * `tlc_fi_state` - A u64 that represents a TLC-FI signal state
     fn from(tlc_fi_state: u64) -> Self {
         match tlc_fi_state {
-            0 => SignalState::UNAVAILABLE,
-            1 => SignalState::DARK,
-            2 | 3 => SignalState::RED,
-            5 | 6 => SignalState::GREEN,
-            7 | 8 => SignalState::AMBER,
+            0 => SignalState::Unavailable,
+            1 => SignalState::Dark,
+            2 | 3 => SignalState::Red,
+            5 | 6 => SignalState::Green,
+            7 | 8 => SignalState::Amber,
+            9 => SignalState::AmberFlashing,
             _ => panic!(
                 "Don't know what SignalState to transform '{}' into.",
                 tlc_fi_state
@@ -53,11 +55,12 @@ impl SignalState {
     /// Transforms a [SignalState](enum.SignalState.html) to the value corresponding to that state in VLog
     pub fn to_vlog_state(&self) -> i16 {
         match self {
-            Self::UNAVAILABLE => 4,
-            Self::DARK => 4,
-            Self::RED => 0,
-            Self::GREEN => 1,
-            Self::AMBER => 2,
+            Self::Unavailable => 4,
+            Self::Dark => 4,
+            Self::Red => 0,
+            Self::Green => 1,
+            Self::Amber => 2,
+            Self::AmberFlashing => 5,
         }
     }
 }
