@@ -29,21 +29,18 @@ pub fn to_vlog(
     timestamped_changes_vec: Vec<TimestampedChanges>,
     start_date_time: &NaiveDateTime,
     vlog_tlcfi_mapping_file: &str,
-    tlc_name: &str
+    tlc_name: &str,
 ) -> Vec<String> {
-    println!("Found tlc name: {}", tlc_name);
     let vlog_signal_name_mapping =
         load_mappings(&vlog_tlcfi_mapping_file, "Signals").expect(&format!(
             "Couldn't find Signal mappings in the given VLog TLC FI mapping file: {:?}",
             &vlog_tlcfi_mapping_file
         ));
-    println!("Found signal mapping: {:#?}", &vlog_signal_name_mapping);
     let vlog_detector_name_mapping =
         load_mappings(&vlog_tlcfi_mapping_file, "Detectors").expect(&format!(
             "Couldn't find Detector mappings in the given VLog TLC FI mapping file: {:?}",
             &vlog_tlcfi_mapping_file
         ));
-    println!("Found detector mapping: {:#?}", &vlog_detector_name_mapping);
 
     let mut vlog_messages: Vec<String> = Vec::new();
 
@@ -53,7 +50,7 @@ pub fn to_vlog(
 
     for timestamped_changes in timestamped_changes_vec {
         if timestamped_changes.ms_from_beginning - ms_of_last_time_reference
-            > TIME_REFERENCE_INTERVAL_IN_S * 1000
+            >= TIME_REFERENCE_INTERVAL_IN_S * 1000
         {
             vlog_messages.push(get_time_reference(
                 start_date_time,
@@ -62,7 +59,7 @@ pub fn to_vlog(
             ms_of_last_time_reference = timestamped_changes.ms_from_beginning;
         }
         if !timestamped_changes.signal_names.is_empty() {
-            vlog_messages.push(transform_signal_changes(
+            vlog_messages.extend(transform_signal_changes(
                 timestamped_changes,
                 &vlog_signal_name_mapping,
                 ms_of_last_time_reference,
@@ -149,7 +146,7 @@ fn transform_signal_changes(
     signal_changes: TimestampedChanges,
     vlog_signal_name_mapping: &HashMap<String, i16>,
     ms_of_last_time_reference: u64,
-) -> String {
+) -> Vec<String> {
     // The structure for a CHANGE_EXTERNAL_SIGNALGROUP_STATUS_WUS
     // description  hex digits
     // type         2
@@ -160,41 +157,81 @@ fn transform_signal_changes(
     //   state      2
     let message_type = "0E";
 
-    let data_amount = format!("{:?}", signal_changes.signal_names.len());
-    let static_string = format!(
-        "{:}{:03X}{:}",
-        message_type,
-        from_tlcfi_time_to_vlog_time(signal_changes.ms_from_beginning - ms_of_last_time_reference),
-        data_amount
-    );
+    let data_limit_split_changes = split_changes_on_data_limit_signal(signal_changes, 4);
 
-    let mut dynamic_string = String::new();
-    let mut vlog_ids_in_message: Vec<(usize, &i16)> = signal_changes
-        .signal_names
-        .iter()
-        .enumerate()
-        .map(|(index, name)| {
-            (
-                index,
-                vlog_signal_name_mapping.get(name as &str).expect(&format!(
-                    "Couldn't find TLC FI signal name '{:?}' in VLog mapping file",
-                    name
-                )),
-            )
-        })
-        .collect();
-    vlog_ids_in_message.sort_by(|(_, id1), (_, id2)| {
-        id1.partial_cmp(id2)
-            .expect("Failed to compare VLog ids. This should never happen.")
-    });
-    for (index, signal_id) in vlog_ids_in_message {
-        dynamic_string.push_str(&format!(
-            "{:02X}{:02X}",
-            signal_id,
-            signal_changes.signal_states[index].to_vlog_state()
-        ));
+    let mut messages = Vec::new();
+
+    for changes in data_limit_split_changes {
+        let data_amount = format!("{:X}", changes.signal_names.len());
+        let static_string = format!(
+            "{:}{:03X}{:}",
+            message_type,
+            from_tlcfi_time_to_vlog_time(changes.ms_from_beginning - ms_of_last_time_reference),
+            data_amount
+        );
+
+        let mut dynamic_string = String::new();
+        let mut vlog_ids_in_message: Vec<(usize, &i16)> = changes
+            .signal_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| {
+                (
+                    index,
+                    vlog_signal_name_mapping.get(name as &str).expect(&format!(
+                        "Couldn't find TLC FI signal name '{:?}' in VLog mapping file",
+                        name
+                    )),
+                )
+            })
+            .collect();
+        vlog_ids_in_message.sort_by(|(_, id1), (_, id2)| {
+            id1.partial_cmp(id2)
+                .expect("Failed to compare VLog ids. This should never happen.")
+        });
+        for (index, signal_id) in vlog_ids_in_message {
+            dynamic_string.push_str(&format!(
+                "{:02X}{:02X}",
+                signal_id,
+                changes.signal_states[index].to_vlog_state()
+            ));
+        }
+        messages.push(format!("{}{}", static_string, dynamic_string))
     }
-    format!("{}{}", static_string, dynamic_string)
+    messages
+}
+
+fn split_changes_on_data_limit_signal(
+    changes: TimestampedChanges,
+    data_size: i32,
+) -> Vec<TimestampedChanges> {
+    let mut split_changes = Vec::new();
+    let max_amount = 40 / data_size;
+    let mut amount_in_timestampted_changes = 0;
+
+    let mut last_timestamped_changes = TimestampedChanges {
+        ms_from_beginning: changes.ms_from_beginning,
+        ..Default::default()
+    };
+
+    for (i, name) in changes.signal_names.iter().enumerate() {
+        last_timestamped_changes.signal_names.push(name.to_string());
+        last_timestamped_changes.signal_states.push(changes.signal_states[i]);
+        amount_in_timestampted_changes += 1;
+
+        if amount_in_timestampted_changes == max_amount {
+            split_changes.push(last_timestamped_changes);
+            last_timestamped_changes = TimestampedChanges {
+                ms_from_beginning: changes.ms_from_beginning,
+                ..Default::default()
+            };
+            amount_in_timestampted_changes = 0;
+        }
+    }
+
+    split_changes.push(last_timestamped_changes);
+
+    split_changes
 }
 
 fn transform_detector_changes(
@@ -339,10 +376,30 @@ mod test {
     }
 
     fn get_test_vlog_signal_name_mapping() -> HashMap<String, i16> {
-        [("71".to_string(), 0), ("11".to_string(), 1)]
-            .iter()
-            .cloned()
-            .collect()
+        [
+            ("01".to_string(), 0),
+            ("02".to_string(), 1),
+            ("03".to_string(), 2),
+            ("04".to_string(), 3),
+            ("05".to_string(), 4),
+            ("06".to_string(), 5),
+            ("07".to_string(), 6),
+            ("08".to_string(), 7),
+            ("09".to_string(), 8),
+            ("10".to_string(), 9),
+            ("11".to_string(), 10),
+            ("12".to_string(), 11),
+            ("13".to_string(), 12),
+            ("14".to_string(), 13),
+            ("15".to_string(), 14),
+            ("16".to_string(), 15),
+            ("17".to_string(), 16),
+            ("18".to_string(), 17),
+            ("71".to_string(), 18),
+        ]
+        .iter()
+        .cloned()
+        .collect()
     }
 
     fn get_test_vlog_detector_name_mapping() -> HashMap<String, i16> {
@@ -375,7 +432,7 @@ mod test {
 
     #[test]
     fn transform_signal_changes_should_create_a_vlog_signal_change_message() {
-        let expected_signal_change_message = "0E003200000102";
+        let expected_signal_change_message = vec!["0E00320A021200"];
         let detector_changes = TimestampedChanges {
             ms_from_beginning: 530,
             signal_names: vec!["11".to_string(), "71".to_string()],
@@ -390,6 +447,64 @@ mod test {
             transform_signal_changes(detector_changes, &get_test_vlog_signal_name_mapping(), 180);
 
         assert_eq!(actual_signal_change_message, expected_signal_change_message);
+    }
+
+    #[test]
+    fn transforming_more_than_40_bits_of_changes_should_make_multiple_messages() {
+        // 0E 0A1 A  0002 0102 0202 0302 0402 0502 0602 0702 0802 0902
+        // 0E 255 10 0005 0105 0205 0305 0405 0505 0605 0705 0805 0905
+        // 0E 255 18 0005 0105 0205 0305 0405 0505 0605 0705 0805 0905 0A05 0B05 0C05 0D05 0E05 0F05 1005 1105
+        // 0E 003 18 0000 0100 0200 0300 0400 0500 0600 0700 0800 0900 0A00 0B00 0C00 0D00 0E00 0F00 1000 1100
+        let expected_messages = vec!["0E003A0000010002000300040005000600070008000900", "0E00380A000B000C000D000E000F0010001100"];
+        let detector_changes = TimestampedChanges {
+            ms_from_beginning: 530,
+            signal_names: vec![
+                "01".to_string(),
+                "02".to_string(),
+                "03".to_string(),
+                "04".to_string(),
+                "05".to_string(),
+                "06".to_string(),
+                "07".to_string(),
+                "08".to_string(),
+                "09".to_string(),
+                "10".to_string(),
+                "11".to_string(),
+                "12".to_string(),
+                "13".to_string(),
+                "14".to_string(),
+                "15".to_string(),
+                "16".to_string(),
+                "17".to_string(),
+                "18".to_string(),
+            ],
+            signal_states: vec![
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+                tlcfi_assimilator::SignalState::Red,
+            ],
+            ..Default::default()
+        };
+
+        let actual_signal_change_message =
+            transform_signal_changes(detector_changes, &get_test_vlog_signal_name_mapping(), 180);
+
+        assert_eq!(actual_signal_change_message, expected_messages);
     }
 
     #[test]

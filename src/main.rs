@@ -1,5 +1,5 @@
 use std::{
-    fs::{read_to_string, File},
+    fs::File,
     io::{BufRead, BufReader, Write},
 };
 
@@ -7,7 +7,7 @@ mod tlcfi_parsing;
 mod vlog_transformer;
 
 use chrono::NaiveDateTime;
-use tlcfi_assimilator::TimestampedChanges;
+use tlcfi_assimilator::AssimilationData;
 
 const ARGS_HELP: &str = "\
 TLC-FI Assimilator
@@ -41,24 +41,30 @@ fn main() {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error: {}.", e);
-            print!("{}", ARGS_HELP);
+            println!("{}", ARGS_HELP);
             std::process::exit(1);
         }
     };
 
-    run_with_args(app_args);
+    run_with_args(app_args)
 }
 
 fn run_with_args(app_args: AppArgs) {
-    let start_time = &app_args
-        .start_date_time
-        .expect("Start date and time must be known by now");
-    let first_tick = Option::None;
-    let mut changes: Vec<TimestampedChanges> = Vec::new();
-
     let time_sorted_lines = sort_lines(&app_args.tlcfi_log_file, &app_args.is_chronological);
 
-    read_lines_and_save_changes(time_sorted_lines, first_tick, &mut changes);
+    let start_time = &app_args.start_date_time.unwrap_or_else(||
+        get_start_date_time_from_file(&time_sorted_lines).expect("Failed to get start date time from logs, set it in application arguments instead or filter the logs."));
+
+    let mut data = AssimilationData {
+        start_time: *start_time,
+        sorted_lines: time_sorted_lines,
+        first_tick: Option::None,
+        previous_tick: Option::None,
+        bonus_ms: Option::None,
+        changes: Vec::new(),
+    };
+
+    read_lines_and_save_changes(&mut data);
     let tlc_name =
         vlog_transformer::load_tlc_name(&app_args.vlog_tlcfi_mapping_file).expect(&format!(
             "Couldn't find a TLC name in the given VLog TLC FI mapping file: {:?}",
@@ -66,7 +72,7 @@ fn run_with_args(app_args: AppArgs) {
         ));
 
     let vlog_messages = vlog_transformer::to_vlog(
-        changes,
+        data.changes,
         start_time,
         &app_args.vlog_tlcfi_mapping_file,
         &tlc_name,
@@ -89,7 +95,8 @@ fn run_with_args(app_args: AppArgs) {
 }
 
 fn sort_lines(tlcfi_log_file: &str, is_chronological: &bool) -> Vec<String> {
-    let tlcfi_log_file = File::open(tlcfi_log_file).expect("Couldn't open the given file path for the TLC FI logs");
+    let tlcfi_log_file =
+        File::open(tlcfi_log_file).expect("Couldn't open the given file path for the TLC FI logs");
     let reader = BufReader::new(tlcfi_log_file);
     let mut time_sorted_lines = Vec::new();
     for line_res in reader.lines() {
@@ -106,39 +113,26 @@ fn sort_lines(tlcfi_log_file: &str, is_chronological: &bool) -> Vec<String> {
     time_sorted_lines
 }
 
-fn read_lines_and_save_changes(
-    time_sorted_lines: Vec<String>,
-    mut first_tick: Option<u64>,
-    changes: &mut Vec<TimestampedChanges>,
-) {
-    for line in time_sorted_lines {
+fn read_lines_and_save_changes(data: &mut AssimilationData) {
+    for line in data.sorted_lines.clone() {
         let filtered_line = line.replace("\"\"", "\"");
         let split_line: Vec<&str> = filtered_line.split("- ").collect();
 
         if split_line.len() != 3 {
             // This program is only familiar with lines that split into three parts with "- "
-            println!(
-                "Following line was not able to be split by '- ' as expected: {}",
-                line
-            );
             continue;
         }
 
         // Only consider message from the TLC.
         if split_line[1].contains("IN") {
-            if first_tick == Option::None {
-                first_tick = tlcfi_parsing::find_first_tick(&split_line[2]);
+            if data.first_tick == Option::None {
+                data.first_tick = tlcfi_parsing::find_first_tick(&split_line[2]);
             }
-            if let Some(first_tick) = first_tick {
+            if data.first_tick.is_some() {
                 if let Ok(timestamped_changes_res) =
-                    tlcfi_parsing::parse_string(split_line[2], first_tick)
+                    tlcfi_parsing::parse_string(split_line[2], data)
                 {
-                    changes.extend(timestamped_changes_res)
-                } else {
-                    eprintln!(
-                        "Failed to parse string {:?} with first tick {:?}",
-                        split_line[2], first_tick
-                    )
+                    data.changes.extend(timestamped_changes_res)
                 }
             } else {
                 eprintln!("Didn't find a first tick yet!")
@@ -157,11 +151,11 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
     let mut pargs = pico_args::Arguments::from_env();
 
     if pargs.contains(["-h", "--help"]) {
-        print!("{}", ARGS_HELP);
+        println!("{}", ARGS_HELP);
         std::process::exit(0);
     }
 
-    let mut args = AppArgs {
+    let args = AppArgs {
         is_chronological: pargs
             .opt_value_from_str("--chronological")?
             .unwrap_or(false),
@@ -171,13 +165,6 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
             .unwrap_or("tlcfi.txt".to_string()),
         vlog_tlcfi_mapping_file: pargs.free_from_fn(check_file_existence)?,
     };
-
-    if args.start_date_time == None {
-        args.start_date_time = Some(get_start_date_time_from_file(
-            &args.is_chronological,
-            &args.tlcfi_log_file,
-        )?);
-    }
     Ok(args)
 }
 
@@ -193,11 +180,8 @@ fn parse_date_time(arg: &str) -> Result<NaiveDateTime, String> {
 }
 
 fn get_start_date_time_from_file(
-    is_chronological: &bool,
-    tlcfi_log_file: &str,
+    sorted_lines: &Vec<String>,
 ) -> Result<NaiveDateTime, pico_args::Error> {
-    let sorted_lines = sort_lines(tlcfi_log_file, is_chronological);
-
     let mut date_time_bit = String::new();
     for line in sorted_lines {
         let split_line: Vec<&str> = line.split("- ").collect();
@@ -205,12 +189,11 @@ fn get_start_date_time_from_file(
         // if it is a logline
         if line.len() >= 23 && split_line.len() == 3 {
             date_time_bit = line[0..23].to_string();
-            break
+            break;
         }
     }
 
     date_time_bit = date_time_bit.replace(",", ".").replace(" ", "T");
-
 
     match parse_date_time(&date_time_bit) {
         Ok(date_time) => Ok(date_time),
@@ -243,6 +226,7 @@ mod test {
 
     use super::*;
     use chrono::{NaiveDate, NaiveDateTime};
+    use std::fs::read_to_string;
     use tlcfi_assimilator::{self, DetectorState};
 
     const RELATIVE_TLCFI_FILE_PATH: &str = "./tlcfi.txt";
@@ -279,53 +263,63 @@ mod test {
 
     #[test]
     fn reading_an_empty_line_should_not_result_in_any_changes_added() {
-        let lines = vec![String::from("")];
-        let first_tick = Option::Some(0);
-        let mut empty_changes = Vec::new();
+        let mut data = AssimilationData {
+            start_time: get_test_start_time(),
+            sorted_lines: vec![String::from("")],
+            first_tick: Option::Some(0),
+            ..Default::default()
+        };
 
-        read_lines_and_save_changes(lines, first_tick, &mut empty_changes);
+        read_lines_and_save_changes(&mut data);
 
-        assert!(empty_changes.is_empty());
+        assert!(data.changes.is_empty());
     }
 
     #[test]
     fn reading_an_out_line_should_not_result_in_any_changes_added() {
-        let lines = vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - OUT - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087974612,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")];
-        let first_tick = Option::Some(0);
-        let mut empty_changes = Vec::new();
+        let mut data = AssimilationData {
+            start_time: get_test_start_time(),
+            sorted_lines: vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - OUT - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087974612,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")],
+            first_tick: Option::Some(0),
+            ..Default::default()
+        };
 
-        read_lines_and_save_changes(lines, first_tick, &mut empty_changes);
+        read_lines_and_save_changes(&mut data);
 
-        assert!(empty_changes.is_empty());
+        assert!(data.changes.is_empty());
     }
 
     #[test]
     fn reading_a_valid_line_should_mutate_changes() {
-        let lines = vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - IN - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")];
-        let first_tick = Option::Some(4000);
-        let mut changes = Vec::new();
+        let mut data = AssimilationData {
+            start_time: get_test_start_time(),
+            sorted_lines: vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - IN - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")],
+            first_tick: Option::Some(4000),
+            ..Default::default()
+        };
 
-        read_lines_and_save_changes(lines, first_tick, &mut changes);
+        read_lines_and_save_changes(&mut data);
 
-        assert!(!changes.is_empty());
-        let change = &changes[0];
-        assert_eq!(change.ms_from_beginning, 4087 - first_tick.unwrap());
+        assert!(!data.changes.is_empty());
+        let change = &data.changes[0];
+        assert_eq!(change.ms_from_beginning, 4087 - data.first_tick.unwrap());
         assert_eq!(change.detector_names[0], "D681");
         assert_eq!(change.detector_states[0], DetectorState::FREE);
-        println!("{:?}", changes[0])
     }
 
     #[test]
     fn reading_a_valid_line_without_a_first_tick_should_set_the_first_tick_to_the_one_of_the_message(
     ) {
-        let lines = vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - IN - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087974612,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")];
-        let first_tick = Option::None;
-        let mut changes = Vec::new();
+        let mut data = AssimilationData {
+            start_time: get_test_start_time(),
+            sorted_lines: vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - IN - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087974612,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")],
+            ..Default::default()
+        };
 
-        read_lines_and_save_changes(lines, first_tick, &mut changes);
+        read_lines_and_save_changes(&mut data);
 
-        assert!(!changes.is_empty());
-        assert_eq!(changes[0].ms_from_beginning, 0); // it being 0 means this is the very first message handled, and first tick is equal to it
+        assert!(!data.changes.is_empty());
+        assert_eq!(data.changes[0].ms_from_beginning, 0); // it being 0 means this is the very first message handled, and first tick is equal to it
     }
 
     #[test]
@@ -349,10 +343,11 @@ mod test {
     }
 
     #[test]
-    fn getting_start_date_time_from_a_file_should_interpret_log_timestamps_as_naivedatetime(){
+    fn getting_start_date_time_from_a_file_should_interpret_log_timestamps_as_naivedatetime() {
         let expected_start_date_time = parse_date_time("2021-12-15T11:00:00.074").unwrap();
+        let lines = vec![String::from("2021-12-15 11:00:00,074 INFO  tlcFiMessages:41 - OUT - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087974612,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")];
 
-        let start_date_time_from_log = get_start_date_time_from_file(&false, RELATIVE_TLCFI_FILE_PATH);
+        let start_date_time_from_log = get_start_date_time_from_file(&lines);
 
         assert!(start_date_time_from_log.is_ok());
         assert_eq!(start_date_time_from_log.unwrap(), expected_start_date_time);

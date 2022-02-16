@@ -1,6 +1,8 @@
 use json::{parse, JsonValue};
 
-use tlcfi_assimilator::TimestampedChanges;
+use tlcfi_assimilator::{AssimilationData, TimestampedChanges};
+
+const MAX_TICKS: u64 = 4294967295;
 
 pub fn find_first_tick(first_line_json: &str) -> Option<u64> {
     let json_res = parse(first_line_json);
@@ -18,15 +20,21 @@ pub fn find_first_tick(first_line_json: &str) -> Option<u64> {
     }
 }
 
-pub fn parse_string(json_str: &str, first_tick: u64) -> Result<Vec<TimestampedChanges>, String> {
+pub fn parse_string(
+    json_str: &str,
+    data: &mut AssimilationData,
+) -> Result<Vec<TimestampedChanges>, String> {
     let json_res = parse(json_str);
     match json_res {
-        Ok(json_obj) => parse_json(json_obj, first_tick),
+        Ok(json_obj) => parse_json(json_obj, data),
         Err(_) => Err("Failed to parse json string".to_string()),
     }
 }
 
-fn parse_json(json_obj: JsonValue, first_tick: u64) -> Result<Vec<TimestampedChanges>, String> {
+fn parse_json(
+    json_obj: JsonValue,
+    data: &mut AssimilationData,
+) -> Result<Vec<TimestampedChanges>, String> {
     let timestamped_changes = vec![];
 
     let message_type = match &json_obj["params"]["update"][0]["objects"]["type"] {
@@ -38,18 +46,8 @@ fn parse_json(json_obj: JsonValue, first_tick: u64) -> Result<Vec<TimestampedCha
     };
 
     match message_type {
-        3 => parse_change_json(
-            json_obj,
-            first_tick,
-            timestamped_changes,
-            ChangeType::Signal,
-        ),
-        4 => parse_change_json(
-            json_obj,
-            first_tick,
-            timestamped_changes,
-            ChangeType::Detector,
-        ),
+        3 => parse_change_json(json_obj, data, timestamped_changes, ChangeType::Signal),
+        4 => parse_change_json(json_obj, data, timestamped_changes, ChangeType::Detector),
         // There are many valid message types we don't support (yet)
         _ => Ok(Vec::new()),
     }
@@ -57,11 +55,11 @@ fn parse_json(json_obj: JsonValue, first_tick: u64) -> Result<Vec<TimestampedCha
 
 fn parse_change_json(
     json_obj: JsonValue,
-    first_tick: u64,
+    data: &mut AssimilationData,
     mut timestamped_changes: Vec<TimestampedChanges>,
     change_type: ChangeType,
 ) -> Result<Vec<TimestampedChanges>, String> {
-    let ms_from_beginning = find_ms_from_beginning(&json_obj, first_tick);
+    let ms_from_beginning = find_ms_from_beginning(&json_obj, data);
 
     let update = &json_obj["params"]["update"][0];
 
@@ -138,27 +136,56 @@ fn parse_change_json(
     }
 }
 
-fn find_ms_from_beginning(json_obj: &JsonValue, first_tick: u64) -> u64 {
+fn find_ms_from_beginning(json_obj: &JsonValue, data: &mut AssimilationData) -> u64 {
     match json_obj["params"]["ticks"] {
         JsonValue::Number(number) => {
             let tick = number.as_fixed_point_u64(0).expect(&format!(
                 "The following TLC FI message was faulty and had a tick value that was outside the expected range: {:#}",
                 &json_obj
             ));
+
+            let first_tick = data
+                .first_tick
+                .expect("First tick has to be present by now.");
+            let ms_from_beginning;
             if tick < first_tick {
-                eprintln!(
-                    "Tick in message ({:?}) wasn't bigger than initial tick!",
-                    &tick
-                );
-                0
+                ms_from_beginning = handle_tick_overflow_or_reset(data, first_tick, tick);
             } else {
-                tick - first_tick
+                ms_from_beginning = tick - first_tick + data.bonus_ms.unwrap_or(0);
             }
+            data.previous_tick = Some(tick);
+            ms_from_beginning
         }
         _ => {
             //TODO handle this better
             1
         }
+    }
+}
+
+fn handle_tick_overflow_or_reset(
+    data: &mut AssimilationData,
+    first_tick: u64,
+    tick: u64,
+) -> u64 {
+    let previous_tick = data
+        .previous_tick
+        .expect("Of course we have a previous tick by now");
+    let small_enough_difference = 5000;
+    if MAX_TICKS - previous_tick < small_enough_difference {
+        println!("Tick overflow detected.");
+        data.bonus_ms = Some(MAX_TICKS - first_tick);
+        data.first_tick = Some(tick);
+        data.bonus_ms
+            .expect("We just set this option with something.")
+            + tick
+    } else {
+        println!("Tick reset detected.");
+        // a reset in the tlc has happened
+        data.bonus_ms = Some(previous_tick - first_tick);
+        data.first_tick = Some(tick);
+        data.bonus_ms
+            .expect("We just set this option with something.")
     }
 }
 
@@ -170,6 +197,7 @@ enum ChangeType {
 #[cfg(test)]
 mod test {
     use super::*;
+    use json::object;
     use tlcfi_assimilator;
 
     const TEST_DETECTOR_JSON: &str = "{\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087808637,\"update\":[{\"objects\":{\"ids\":[\"D713\"],\"type\":4},\"states\":[{\"state\":1}]}]}}";
@@ -177,6 +205,13 @@ mod test {
     const TEST_SIGNAL_JSON: &str = "{\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087808851,\"update\":[{\"objects\":{\"ids\":[\"71\"],\"type\":3},\"states\":[{\"state\":6}]}]}}";
 
     const FIRST_TICK: u64 = 4087807987;
+
+    fn get_test_data() -> AssimilationData {
+        AssimilationData {
+            first_tick: Some(FIRST_TICK),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn first_tick_should_be_tick_of_the_message() {
@@ -193,7 +228,7 @@ mod test {
         }];
 
         assert_eq!(
-            parse_string(TEST_DETECTOR_JSON, FIRST_TICK)?,
+            parse_string(TEST_DETECTOR_JSON, &mut get_test_data())?,
             expected_changes
         );
         Ok(())
@@ -209,9 +244,46 @@ mod test {
         }];
 
         assert_eq!(
-            parse_string(TEST_SIGNAL_JSON, FIRST_TICK)?,
+            parse_string(TEST_SIGNAL_JSON, &mut get_test_data())?,
             expected_changes
         );
         Ok(())
+    }
+
+    #[test]
+    fn reset_ticks() {
+        let json_obj = object! {"params" => object! {"ticks" => 29224}};
+        let initial_tick = 293219704;
+        let previous_tick = 326765322;
+        let mut test_data = AssimilationData {
+            first_tick: Some(initial_tick),
+            previous_tick: Some(previous_tick),
+            ..Default::default()
+        };
+
+        let ms_from_beginning = find_ms_from_beginning(&json_obj, &mut test_data);
+
+        assert_ne!(0, ms_from_beginning);
+        assert_eq!(33545618, ms_from_beginning);
+    }
+
+    // tick reset: Tick in message (29224) wasn't bigger than initial tick (293219704)!
+    // tick ovrfl: previous tick was close to 4294967295
+    #[test]
+    fn a_message_with_a_tick_smaller_than_the_initial_tick_should_overwrite_the_initial_tick_to_handle_an_overflow(
+    ) {
+        let json_obj = object! {"params" => object! {"ticks" => 12}};
+        let big_first_tick = 4294966895;
+        let previous_tick = 4294967095;
+        let mut test_data = AssimilationData {
+            first_tick: Some(big_first_tick),
+            previous_tick: Some(previous_tick),
+            ..Default::default()
+        };
+
+        let ms_from_beginning = find_ms_from_beginning(&json_obj, &mut test_data);
+
+        assert_ne!(0, ms_from_beginning);
+        assert_eq!(412, ms_from_beginning);
     }
 }
