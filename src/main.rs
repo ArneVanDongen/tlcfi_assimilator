@@ -1,5 +1,5 @@
 use std::{
-    fs::{File},
+    fs::File,
     io::{BufRead, BufReader, Write},
 };
 
@@ -49,18 +49,10 @@ fn main() {
     run_with_args(app_args)
 }
 
-fn run_with_args(mut app_args: AppArgs) {
+fn run_with_args(app_args: AppArgs) {
+    let start_time = &app_args.start_date_time.unwrap_or_else(||
+        get_start_date_time_from_file(&app_args.is_chronological, &app_args.tlcfi_log_file).expect("Failed to get start date time from logs, set it in application arguments instead or filter the logs."));
 
-    if app_args.start_date_time == None {
-        app_args.start_date_time = Some(get_start_date_time_from_file(
-            &app_args.is_chronological,
-            &app_args.tlcfi_log_file,
-        ).expect("Failed to get start date time from logs, set it in application arguments instead or filter the logs."));
-    }
-
-    let start_time = &app_args
-        .start_date_time
-        .expect("Start date and time must be known by now");
     let first_tick = Option::None;
     let mut changes: Vec<TimestampedChanges> = Vec::new();
 
@@ -97,7 +89,8 @@ fn run_with_args(mut app_args: AppArgs) {
 }
 
 fn sort_lines(tlcfi_log_file: &str, is_chronological: &bool) -> Vec<String> {
-    let tlcfi_log_file = File::open(tlcfi_log_file).expect("Couldn't open the given file path for the TLC FI logs");
+    let tlcfi_log_file =
+        File::open(tlcfi_log_file).expect("Couldn't open the given file path for the TLC FI logs");
     let reader = BufReader::new(tlcfi_log_file);
     let mut time_sorted_lines = Vec::new();
     for line_res in reader.lines() {
@@ -206,12 +199,11 @@ fn get_start_date_time_from_file(
         // if it is a logline
         if line.len() >= 23 && split_line.len() == 3 {
             date_time_bit = line[0..23].to_string();
-            break
+            break;
         }
     }
 
     date_time_bit = date_time_bit.replace(",", ".").replace(" ", "T");
-
 
     match parse_date_time(&date_time_bit) {
         Ok(date_time) => Ok(date_time),
@@ -243,8 +235,8 @@ struct AppArgs {
 mod test {
 
     use super::*;
-    use std::fs::read_to_string;
     use chrono::{NaiveDate, NaiveDateTime};
+    use std::fs::read_to_string;
     use tlcfi_assimilator::{self, DetectorState};
 
     const RELATIVE_TLCFI_FILE_PATH: &str = "./tlcfi.txt";
@@ -351,10 +343,11 @@ mod test {
     }
 
     #[test]
-    fn getting_start_date_time_from_a_file_should_interpret_log_timestamps_as_naivedatetime(){
+    fn getting_start_date_time_from_a_file_should_interpret_log_timestamps_as_naivedatetime() {
         let expected_start_date_time = parse_date_time("2021-12-15T11:00:00.074").unwrap();
 
-        let start_date_time_from_log = get_start_date_time_from_file(&false, RELATIVE_TLCFI_FILE_PATH);
+        let start_date_time_from_log =
+            get_start_date_time_from_file(&false, RELATIVE_TLCFI_FILE_PATH);
 
         assert!(start_date_time_from_log.is_ok());
         assert_eq!(start_date_time_from_log.unwrap(), expected_start_date_time);
