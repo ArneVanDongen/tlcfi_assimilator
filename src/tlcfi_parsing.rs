@@ -151,7 +151,7 @@ fn find_ms_from_beginning(json_obj: &JsonValue, data: &mut AssimilationData) -> 
             if tick < first_tick {
                 ms_from_beginning = handle_tick_overflow_or_reset(data, first_tick, tick);
             } else {
-                ms_from_beginning = tick - first_tick;
+                ms_from_beginning = tick - first_tick + data.bonus_ms.unwrap_or(0);
             }
             data.previous_tick = Some(tick);
             ms_from_beginning
@@ -173,12 +173,14 @@ fn handle_tick_overflow_or_reset(
         .expect("Of course we have a previous tick by now");
     let small_enough_difference = 5000;
     if MAX_TICKS - previous_tick < small_enough_difference {
+        println!("Tick overflow detected.");
         data.bonus_ms = Some(MAX_TICKS - first_tick);
         data.first_tick = Some(tick);
         data.bonus_ms
             .expect("We just set this option with something.")
             + tick
     } else {
+        println!("Tick reset detected.");
         // a reset in the tlc has happened
         data.bonus_ms = Some(previous_tick - first_tick);
         data.first_tick = Some(tick);
@@ -261,7 +263,6 @@ mod test {
 
         let ms_from_beginning = find_ms_from_beginning(&json_obj, &mut test_data);
 
-        println!(" What {:?}", ms_from_beginning);
         assert_ne!(0, ms_from_beginning);
         assert_eq!(33545618, ms_from_beginning);
     }

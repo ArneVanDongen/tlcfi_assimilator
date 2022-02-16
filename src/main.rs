@@ -41,7 +41,7 @@ fn main() {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error: {}.", e);
-            print!("{}", ARGS_HELP);
+            println!("{}", ARGS_HELP);
             std::process::exit(1);
         }
     };
@@ -120,10 +120,6 @@ fn read_lines_and_save_changes(data: &mut AssimilationData) {
 
         if split_line.len() != 3 {
             // This program is only familiar with lines that split into three parts with "- "
-            println!(
-                "Following line was not able to be split by '- ' as expected: {}",
-                line
-            );
             continue;
         }
 
@@ -132,16 +128,11 @@ fn read_lines_and_save_changes(data: &mut AssimilationData) {
             if data.first_tick == Option::None {
                 data.first_tick = tlcfi_parsing::find_first_tick(&split_line[2]);
             }
-            if let Some(first_tick) = data.first_tick {
+            if data.first_tick.is_some() {
                 if let Ok(timestamped_changes_res) =
                     tlcfi_parsing::parse_string(split_line[2], data)
                 {
                     data.changes.extend(timestamped_changes_res)
-                } else {
-                    eprintln!(
-                        "Failed to parse string {:?} with first tick {:?}",
-                        split_line[2], first_tick
-                    )
                 }
             } else {
                 eprintln!("Didn't find a first tick yet!")
@@ -160,7 +151,7 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
     let mut pargs = pico_args::Arguments::from_env();
 
     if pargs.contains(["-h", "--help"]) {
-        print!("{}", ARGS_HELP);
+        println!("{}", ARGS_HELP);
         std::process::exit(0);
     }
 

@@ -38,7 +38,7 @@ impl Default for AssimilationData {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SignalState {
     Unavailable,
     Dark,
