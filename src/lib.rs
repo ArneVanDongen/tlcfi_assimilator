@@ -20,7 +20,22 @@ pub struct AssimilationData {
     pub start_time: NaiveDateTime,
     pub sorted_lines: Vec<String>,
     pub first_tick: Option<u64>,
+    pub previous_tick: Option<u64>,
+    pub bonus_ms: Option<u64>,
     pub changes: Vec<TimestampedChanges>,
+}
+
+impl Default for AssimilationData {
+    fn default() -> Self { 
+        Self {
+            start_time: NaiveDateTime::parse_from_str("2015-09-05 23:56:04", "%Y-%m-%d %H:%M:%S").unwrap(),
+            sorted_lines: Vec::new(),
+            first_tick: Option::None,
+            previous_tick: Option::None,
+            bonus_ms: Option::None, 
+            changes: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

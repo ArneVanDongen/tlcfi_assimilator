@@ -59,6 +59,8 @@ fn run_with_args(app_args: AppArgs) {
         start_time: *start_time,
         sorted_lines: time_sorted_lines,
         first_tick: Option::None,
+        previous_tick: Option::None,
+        bonus_ms: Option::None,
         changes: Vec::new(),
     };
 
@@ -112,7 +114,7 @@ fn sort_lines(tlcfi_log_file: &str, is_chronological: &bool) -> Vec<String> {
 }
 
 fn read_lines_and_save_changes(data: &mut AssimilationData) {
-    for line in &data.sorted_lines {
+    for line in data.sorted_lines.clone() {
         let filtered_line = line.replace("\"\"", "\"");
         let split_line: Vec<&str> = filtered_line.split("- ").collect();
 
@@ -132,7 +134,7 @@ fn read_lines_and_save_changes(data: &mut AssimilationData) {
             }
             if let Some(first_tick) = data.first_tick {
                 if let Ok(timestamped_changes_res) =
-                    tlcfi_parsing::parse_string(split_line[2], first_tick)
+                    tlcfi_parsing::parse_string(split_line[2], data)
                 {
                     data.changes.extend(timestamped_changes_res)
                 } else {
@@ -274,7 +276,7 @@ mod test {
             start_time: get_test_start_time(),
             sorted_lines: vec![String::from("")],
             first_tick: Option::Some(0),
-            changes: Vec::new(),
+            ..Default::default()
         };
 
         read_lines_and_save_changes(&mut data);
@@ -288,7 +290,7 @@ mod test {
             start_time: get_test_start_time(),
             sorted_lines: vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - OUT - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087974612,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")],
             first_tick: Option::Some(0),
-            changes: Vec::new(),
+            ..Default::default()
         };
 
         read_lines_and_save_changes(&mut data);
@@ -302,7 +304,7 @@ mod test {
             start_time: get_test_start_time(),
             sorted_lines: vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - IN - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")],
             first_tick: Option::Some(4000),
-            changes: Vec::new(),
+            ..Default::default()
         };
 
         read_lines_and_save_changes(&mut data);
@@ -320,8 +322,7 @@ mod test {
         let mut data = AssimilationData {
             start_time: get_test_start_time(),
             sorted_lines: vec![String::from("2021-12-15 12:59:59,794 INFO  tlcFiMessages:41 - IN - {\"jsonrpc\":\"2.0\",\"method\":\"UpdateState\",\"params\":{\"ticks\":4087974612,\"update\":[{\"objects\":{\"ids\":[\"D681\"],\"type\":4},\"states\":[{\"state\":0}]}]}}")],
-            first_tick: Option::None,
-            changes: Vec::new(),
+            ..Default::default()
         };
 
         read_lines_and_save_changes(&mut data);
