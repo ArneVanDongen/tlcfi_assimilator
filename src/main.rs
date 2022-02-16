@@ -1,5 +1,5 @@
 use std::{
-    fs::{read_to_string, File},
+    fs::{File},
     io::{BufRead, BufReader, Write},
 };
 
@@ -46,10 +46,18 @@ fn main() {
         }
     };
 
-    run_with_args(app_args);
+    run_with_args(app_args)
 }
 
-fn run_with_args(app_args: AppArgs) {
+fn run_with_args(mut app_args: AppArgs) {
+
+    if app_args.start_date_time == None {
+        app_args.start_date_time = Some(get_start_date_time_from_file(
+            &app_args.is_chronological,
+            &app_args.tlcfi_log_file,
+        ).expect("Failed to get start date time from logs, set it in application arguments instead or filter the logs."));
+    }
+
     let start_time = &app_args
         .start_date_time
         .expect("Start date and time must be known by now");
@@ -161,7 +169,7 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
         std::process::exit(0);
     }
 
-    let mut args = AppArgs {
+    let args = AppArgs {
         is_chronological: pargs
             .opt_value_from_str("--chronological")?
             .unwrap_or(false),
@@ -171,13 +179,6 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
             .unwrap_or("tlcfi.txt".to_string()),
         vlog_tlcfi_mapping_file: pargs.free_from_fn(check_file_existence)?,
     };
-
-    if args.start_date_time == None {
-        args.start_date_time = Some(get_start_date_time_from_file(
-            &args.is_chronological,
-            &args.tlcfi_log_file,
-        )?);
-    }
     Ok(args)
 }
 
@@ -242,6 +243,7 @@ struct AppArgs {
 mod test {
 
     use super::*;
+    use std::fs::read_to_string;
     use chrono::{NaiveDate, NaiveDateTime};
     use tlcfi_assimilator::{self, DetectorState};
 
