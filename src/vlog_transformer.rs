@@ -432,7 +432,7 @@ mod test {
 
     #[test]
     fn transform_signal_changes_should_create_a_vlog_signal_change_message() {
-        let expected_signal_change_message = vec!["0E003200000102"];
+        let expected_signal_change_message = vec!["0E00320A021200"];
         let detector_changes = TimestampedChanges {
             ms_from_beginning: 530,
             signal_names: vec!["11".to_string(), "71".to_string()],
